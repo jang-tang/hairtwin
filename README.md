@@ -158,3 +158,6 @@ The browser app runs at `http://localhost:5173` and the API runs at `http://loca
 - React 개발모드의 중복 effect 실행을 피하도록 entrypoint를 단순화했습니다.
 - 로그인 성공 시 dashboard로 명시적으로 이동하며 버튼 loading 상태를 제공합니다.
 - OpenAI 429 rate limit은 HTTP 429로 전달하고 Retry-After 초를 화면 메시지에 표시합니다.
+
+# hairtwin
+미용실 | 고객과 미용사의 기대값 차이를 해소하는 솔루션
