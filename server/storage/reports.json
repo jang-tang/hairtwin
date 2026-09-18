@@ -1,0 +1,111 @@
+[
+  {
+    "id": "daf1b768-1ac1-4566-90ff-6dc1000a3389",
+    "customerId": "c-1",
+    "stylistId": "stylist-1",
+    "createdAt": "2026-09-18",
+    "hairPhotos": {
+      "front": {
+        "id": "bdbe1d22-ab2b-47e7-8c38-0adafc101200.jpg",
+        "url": "/media/uploads/bdbe1d22-ab2b-47e7-8c38-0adafc101200.jpg",
+        "source": "camera"
+      },
+      "side": {
+        "id": "b24ccb10-e6eb-4407-a5af-c3472f8d18ca.jpg",
+        "url": "/media/uploads/b24ccb10-e6eb-4407-a5af-c3472f8d18ca.jpg",
+        "source": "camera"
+      },
+      "back": {
+        "id": "2bf2b2ca-df44-4ddc-b523-d86ccaf80e16.jpg",
+        "url": "/media/uploads/2bf2b2ca-df44-4ddc-b523-d86ccaf80e16.jpg",
+        "source": "camera"
+      }
+    },
+    "intent": "maintain",
+    "serviceMode": "trim",
+    "gender": "female",
+    "customerType": "first",
+    "isFirstVisit": true,
+    "referenceImage": {
+      "id": "47c5dde9-7b28-4aaf-a501-a69e388d862d.jpg",
+      "url": "/media/uploads/47c5dde9-7b28-4aaf-a501-a69e388d862d.jpg",
+      "source": "upload"
+    },
+    "hairCondition": {
+      "state": "healthy",
+      "thickness": "normal",
+      "texture": "straight",
+      "density": "normal",
+      "elasticity": "normal",
+      "strandFeel": "normal",
+      "history": [
+        "none"
+      ],
+      "sideHairBehavior": "medium-volume"
+    },
+    "selectedPreset": "p-1",
+    "candidates": [
+      {
+        "id": "c091d8d1-e4a3-4201-b081-a60c9dd27ffb",
+        "title": "p-1",
+        "description": "lighter and softer around the fringe, airy silhouette. 고객의 현재 모발 특성을 고려한 상담용 시각화입니다.",
+        "frontImage": "/media/generated/p-1-front-423abf8a-8c4f-4adb-afc5-bb33798370d3.png",
+        "sideImage": "/media/generated/p-1-side-4f3be853-9e34-4575-8b7d-7cb7d53833c6.png",
+        "backImage": "/media/generated/p-1-back-399c7fef-6a46-4777-a591-188043809607.png",
+        "frontImageId": "p-1-front-423abf8a-8c4f-4adb-afc5-bb33798370d3.png",
+        "sideImageId": "p-1-side-4f3be853-9e34-4575-8b7d-7cb7d53833c6.png",
+        "backImageId": "p-1-back-399c7fef-6a46-4777-a591-188043809607.png",
+        "tags": [
+          "AI",
+          "lighter and softer around the fringe, airy silhouette"
+        ]
+      }
+    ],
+    "versions": [],
+    "customerFeedback": [
+      {
+        "id": "3a864c89-aab0-4fce-bbc9-42ad4ea936ae",
+        "text": "조금 더 자연스럽게 해주세요.",
+        "selectedRegions": [
+          {
+            "id": "region-1",
+            "type": "fringe",
+            "x": 0.23282961998456803,
+            "y": 0.2133221209490741,
+            "width": 0.44,
+            "height": 0.24,
+            "view": "back"
+          },
+          {
+            "id": "region-1789752701598",
+            "type": "side",
+            "x": 0.3057568962191358,
+            "y": 0.1362268518518519,
+            "width": 0.4,
+            "height": 0.3,
+            "view": "back"
+          }
+        ],
+        "createdAt": "2026-09-18T17:31:54.048Z"
+      }
+    ],
+    "stylistAdjustments": [],
+    "finalStyle": {
+      "presetId": "p-1",
+      "name": "p-1",
+      "description": "lighter and softer around the fringe, airy silhouette. 고객의 현재 모발 특성을 고려한 상담용 시각화입니다.",
+      "frontImage": "/media/generated/p-1-front-423abf8a-8c4f-4adb-afc5-bb33798370d3.png",
+      "sideImage": "/media/generated/p-1-side-4f3be853-9e34-4575-8b7d-7cb7d53833c6.png",
+      "backImage": "/media/generated/p-1-back-399c7fef-6a46-4777-a591-188043809607.png",
+      "frontImageId": "p-1-front-423abf8a-8c4f-4adb-afc5-bb33798370d3.png",
+      "sideImageId": "p-1-side-4f3be853-9e34-4575-8b7d-7cb7d53833c6.png",
+      "backImageId": "p-1-back-399c7fef-6a46-4777-a591-188043809607.png",
+      "bangLength": 65,
+      "sideHairVolume": "natural",
+      "curlStrength": "medium"
+    },
+    "notes": "",
+    "serviceType": "다듬어주세요",
+    "consent": true
+  }
+]
