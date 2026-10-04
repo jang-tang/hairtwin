@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AppShell, PrimaryButton, SecondaryButton, PageHeader, Chip, Segmented, SliderControl, NoConsult, Guard, MockBadge } from '../components/ui';
 import { useConsult, transitionTo, makeCandidates, stepOrder } from '../stores/consultationStore';
+import { usePresets, presetSummary } from '../stores/presetStore';
 import { useDash, useUi } from '../stores/baseStores';
 import { PRESETS, img, BANG_QUICK, bangLabel } from '../data';
 import { mockPortrait, isMockMode } from '../mocks/mockImages';
@@ -144,10 +145,38 @@ export function PhotoPage() {
 
 export function StylePage() {
   const nav = useNavigate();
-  const { presetId, set, myPresets } = useConsult();
+  const { presetId, set } = useConsult();
+  const stylistPresets = usePresets((s) => s.presets);
+  const refreshPresets = usePresets((s) => s.refresh);
+  useEffect(() => { void refreshPresets(); }, [refreshPresets]);
   return (
     <AppShell>
       <PageHeader title="마음에 드는 스타일을 눌러보세요." sub="고객이 직접 고르면 상담이 빨라져요." step={4} total={TOTAL} />
+      {stylistPresets.length > 0 && (
+        <>
+          <div className="flex items-center justify-between mb-2">
+            <p className="font-bold">우리 매장 프리셋</p>
+            <button onClick={() => nav('/presets/new')} className="text-primary text-[14px] font-bold">+ 등록</button>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+            {stylistPresets.map((m) => (
+              <button key={m.id} onClick={() => set({ presetId: m.id })}
+                className={`rounded-2xl overflow-hidden border-[3px] text-left transition active:scale-[.98] ${presetId === m.id ? 'border-primary shadow-[0_8px_24px_rgba(255,74,93,.25)]' : 'border-line'}`}>
+                {m.refImages.length > 0 ? (
+                  <img src={m.refImages[0]} alt={m.name} className="w-full aspect-square object-cover" />
+                ) : (
+                  <img src={isMockMode() ? mockPortrait(`stylist-${m.id}`, 'front', m.name, m.category) : img(`stylist${m.id}`, 400)} alt={m.name} className="w-full aspect-square object-cover" />
+                )}
+                <div className={`p-3 ${presetId === m.id ? 'bg-primarySoft' : ''}`}>
+                  <p className="font-bold text-[16px]">{m.name}</p>
+                  <p className="text-[13px] text-muted">{presetSummary(m)}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+      <p className="font-bold mb-2">기본 스타일</p>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
         {PRESETS.map((p) => (
           <button key={p.id} onClick={() => set({ presetId: p.id })}
@@ -158,10 +187,6 @@ export function StylePage() {
             </div>
           </button>
         ))}
-      </div>
-      <p className="font-bold mb-2">내 프리셋</p>
-      <div className="flex gap-2 flex-wrap mb-6">
-        {myPresets.map((m) => <Chip key={m.id} active={presetId === m.id} onClick={() => set({ presetId: m.id })}>{m.name}</Chip>)}
       </div>
       <div className="flex gap-2">
         <SecondaryButton onClick={() => transitionTo('photo', nav)}>이전</SecondaryButton>
@@ -236,9 +261,9 @@ export function GenerationPage() {
     let live = true;
     (async () => {
       try {
-        await requestGeneration(`preset:${presetId}`);
+        const res = await requestGeneration(`preset:${presetId}`);
         if (!live) return;
-        set({ candidates: makeCandidates(presetId ?? 'hair'), step: 'generation' });
+        set({ candidates: res.candidates ?? makeCandidates(presetId ?? 'hair'), step: 'generation' });
         transitionTo('candidates', nav);
       } catch (e) { if (live) setErr(e instanceof Error ? e.message : '생성에 실패했어요. 다시 시도해주세요.'); }
     })();

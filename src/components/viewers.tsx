@@ -23,9 +23,20 @@ export function MultiView({ views, tab, onTab }: { views: TriView; tab: 'front' 
 }
 
 // Draggable + resizable region overlay (normalized 0~1 저장)
-export function DraggableRegion({ image, region, onChange }: { image: string; region: Region; onChange: (r: Region) => void }) {
+export interface LengthGuide {
+  key: 'fringe' | 'side';
+  /** 0~100. 사진 세로 기준 기장 위치. 위로 올리면 짧게, 내리면 길게. */
+  y: number;
+  color: string;
+  title: string;
+  display: string;
+  onChange: (v: number) => void;
+}
+
+export function DraggableRegion({ image, region, onChange, guides }: { image: string; region: Region; onChange: (r: Region) => void; guides?: LengthGuide[] }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<null | { mode: 'move' | 'resize'; sx: number; sy: number; ox: number; oy: number; ow: number; oh: number }>(null);
+  const [guideDrag, setGuideDrag] = useState<null | { key: string; startNy: number; origV: number; onChange: (v: number) => void }>(null);
 
   const toNorm = (clientX: number, clientY: number) => {
     const el = boxRef.current!.getBoundingClientRect();
@@ -48,6 +59,21 @@ export function DraggableRegion({ image, region, onChange }: { image: string; re
   };
   const end = () => setDrag(null);
 
+  const guideStart = (g: LengthGuide) => (e: React.PointerEvent) => {
+    e.stopPropagation();
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    const p = toNorm(e.clientX, e.clientY);
+    setGuideDrag({ key: g.key, startNy: p.ny, origV: g.y, onChange: g.onChange });
+  };
+  const guideMove = (e: React.PointerEvent) => {
+    if (!guideDrag) return;
+    const p = toNorm(e.clientX, e.clientY);
+    const dy = (p.ny - guideDrag.startNy) * 100;
+    const next = Math.min(100, Math.max(0, Math.round(guideDrag.origV + dy)));
+    guideDrag.onChange(next);
+  };
+  const guideEnd = () => setGuideDrag(null);
+
   return (
     <div ref={boxRef} className="relative rounded-2xl overflow-hidden border border-line bg-softBg select-none touch-none">
       <img src={image} alt="style" className="w-full aspect-[4/4.4] object-cover pointer-events-none" draggable={false} />
@@ -66,7 +92,32 @@ export function DraggableRegion({ image, region, onChange }: { image: string; re
           onPointerDown={start('resize')}
           className="absolute -bottom-4 -right-4 w-11 h-11 min-w-[44px] min-h-[44px] bg-primary border-4 border-white rounded-full shadow-lg cursor-nwse-resize flex items-center justify-center text-white font-bold">⤡</span>
       </div>
-      <p className="absolute bottom-3 left-3 bg-black/60 text-white text-[13px] px-3 py-1.5 rounded-full">원하는 위치로 끌어보세요</p>
+      {(guides ?? []).map((g) => (
+        <div key={g.key} className="absolute left-0 right-0 z-10" style={{ top: `${g.y}%` }}>
+          <div
+            onPointerDown={guideStart(g)} onPointerMove={guideMove} onPointerUp={guideEnd} onPointerCancel={guideEnd}
+            className="relative flex items-center w-full min-h-[44px] -translate-y-1/2 cursor-ns-resize touch-none"
+            role="slider" aria-label={g.title} aria-valuenow={Math.round(g.y)} aria-valuemin={0} aria-valuemax={100}
+          >
+            <div className="absolute left-0 right-0 h-[3px]" style={{ backgroundColor: g.color, boxShadow: `0 1px 8px ${g.color}` }} />
+            <span
+              className="relative ml-2 text-white text-[13px] font-bold px-3 py-1.5 rounded-full whitespace-nowrap pointer-events-none"
+              style={{ backgroundColor: g.color }}
+            >
+              {g.title} · {g.display}
+            </span>
+            <span
+              className="relative ml-auto mr-2 w-11 h-11 min-w-[44px] min-h-[44px] rounded-full border-4 border-white shadow-lg flex items-center justify-center text-white font-bold pointer-events-none"
+              style={{ backgroundColor: g.color }}
+            >
+              ↕
+            </span>
+          </div>
+        </div>
+      ))}
+      <p className="absolute bottom-3 left-3 bg-black/60 text-white text-[13px] px-3 py-1.5 rounded-full">
+        {(guides?.length ?? 0) > 0 ? '가로선을 위·아래로 끌어 기장을 맞추세요' : '원하는 위치로 끌어보세요'}
+      </p>
     </div>
   );
 }

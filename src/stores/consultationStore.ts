@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { Candidate, HairCondition, Region, RegionType, SideHair, TriView } from '../types';
 import { img } from '../data';
-import { bangLabel } from '../data';
+import { bangLabel, sideLabel } from '../data';
 import { isMockMode, mockTriView } from '../mocks/mockImages';
 
 export type Step =
@@ -38,6 +38,7 @@ interface ConsultationState {
   condition: HairCondition;
   sideHair: SideHair;
   bang: number;
+  sideLength: number;
   candidates: Candidate[];
   selectedCandidate: string | null;
   viewTab: 'front' | 'side' | 'back';
@@ -71,6 +72,7 @@ export const useConsult = create<ConsultationState>()((set) => ({
   condition: { damage: '건강', texture: '직모', thickness: '보통', density: '보통', elasticity: '보통', feel: '보통' },
   sideHair: '자연스럽게 떨어짐',
   bang: 45,
+  sideLength: 50,
   candidates: [],
   selectedCandidate: null,
   viewTab: 'front',
@@ -84,7 +86,7 @@ export const useConsult = create<ConsultationState>()((set) => ({
   reset: () => set({
     step: 'start', intent: '', photos: { front: null, side: null, back: null },
     presetId: null, candidates: [], selectedCandidate: null, quickEdits: [], freeText: '',
-    versions: initVersions('htv' + Date.now()), chosenVersion: 'v2', bang: 45,
+    versions: initVersions('htv' + Date.now()), chosenVersion: 'v2', bang: 45, sideLength: 50,
     region: { id: 'r1', type: 'fringe', x: 0.3, y: 0.22, w: 0.4, h: 0.18, label: '앞머리' }
   })
 }));
@@ -108,12 +110,12 @@ export function makeCandidates(presetSeed: string): Candidate[] {
 }
 
 // 피드백 적용 후: 목업/실서버 모두 V(n+1)을 새로 생성해 비교 흐름을 이어간다.
-// 목업 모드에서는 앞머리 수치·빠른조정이 이미지 라벨에 그대로 반영되어 변화를 눈으로 확인 가능하다.
+// 목업 모드에서는 앞머리·옆머리 수치·빠른조정이 이미지 라벨에 그대로 반영되어 변화를 눈으로 확인 가능하다.
 export function appendEditedVersion() {
   const s = useConsult.getState();
   const n = s.versions.length + 1;
   const id = `v${n}`;
-  const sub = `앞머리 ${bangLabel(s.bang)} · ${s.quickEdits[0] ?? '자연스럽게'}`;
+  const sub = `앞머리 ${bangLabel(s.bang)} · 옆머리 ${sideLabel(s.sideLength ?? 50)}`;
   const views = triView(`edit${Date.now()}${n}`, `${s.candidates.find((c) => c.id === s.selectedCandidate)?.name ?? '선택 스타일'}`, sub);
   s.set({ versions: [...s.versions, { id, label: `V${n}`, views }], chosenVersion: id });
 }

@@ -5,7 +5,7 @@ import { DraggableRegion } from '../components/viewers';
 import { useConsult, transitionTo, setRegionType, appendEditedVersion } from '../stores/consultationStore';
 import { useDash, useUi } from '../stores/baseStores';
 import { REGION_LABEL, QUICK_OPTIONS, type RegionType } from '../types';
-import { bangLabel } from '../data';
+import { bangLabel, sideLabel, BANG_QUICK, SIDE_QUICK, FRINGE_LINE_COLOR, SIDE_LINE_COLOR } from '../data';
 import { requestEdit, regionToMaskHint, isMockMode } from '../api/aiClient';
 
 // 영역 선택 → 보여줄 목업 방향 (앞머리=앞, 옆머리=옆, 뒷머리=뒤)
@@ -52,7 +52,7 @@ export function CandidatesPage() {
 
 export function FeedbackPage() {
   const nav = useNavigate();
-  const { candidates, selectedCandidate, region, set, bang, quickEdits, freeText } = useConsult();
+  const { candidates, selectedCandidate, region, set, bang, sideLength, quickEdits, freeText } = useConsult();
   const toast = useUi((s) => s.showToast);
   const cd = candidates.find((c) => c.id === selectedCandidate) ?? candidates[0];
   const [busy, setBusy] = useState(false);
@@ -84,12 +84,28 @@ export function FeedbackPage() {
   };
   return (
     <AppShell>
-      <PageHeader title="여기서 조금 바꾸고 싶은 부분이 있나요?" sub="바꾸고 싶은 머리 부분을 눌러보세요." step={8} total={10} />
+      <PageHeader title="여기서 조금 바꾸고 싶은 부분이 있나요?" sub="가로선을 끌어 앞머리·옆머리 기장을 직접 맞추세요." step={8} total={10} />
       <div className="grid lg:grid-cols-[1.2fr_.8fr] gap-4">
         <div>
-          {region && <DraggableRegion image={cd.views[shownView]} region={region} onChange={(r) => set({ region: r })} />}
+          {region && (
+            <DraggableRegion
+              image={cd.views[shownView]} region={region} onChange={(r) => set({ region: r })}
+              guides={[
+                { key: 'fringe', y: bang, color: FRINGE_LINE_COLOR, title: '앞머리', display: bangLabel(bang), onChange: (v) => set({ bang: v }) },
+                { key: 'side', y: sideLength ?? 50, color: SIDE_LINE_COLOR, title: '옆머리', display: sideLabel(sideLength ?? 50), onChange: (v) => set({ sideLength: v }) },
+              ]}
+            />
+          )}
+          <div className="flex gap-2 justify-center mt-3 text-[13px] font-semibold">
+            <span className="inline-flex items-center gap-1.5 border border-line rounded-full px-3 py-1.5">
+              <span className="w-4 h-1 rounded-full" style={{ backgroundColor: FRINGE_LINE_COLOR }} /> 앞머리 · {bangLabel(bang)}
+            </span>
+            <span className="inline-flex items-center gap-1.5 border border-line rounded-full px-3 py-1.5">
+              <span className="w-4 h-1 rounded-full" style={{ backgroundColor: SIDE_LINE_COLOR }} /> 옆머리 · {sideLabel(sideLength ?? 50)}
+            </span>
+          </div>
           <p className="text-center text-[14px] text-secondary mt-2">
-            {VIEW_KO[shownView]}에서 {region ? REGION_LABEL[region.type] : ''} 조정 중 · 영역을 눌러 바꾸면 사진이 따라 바뀝니다
+            {VIEW_KO[shownView]}에서 {region ? REGION_LABEL[region.type] : ''} 조정 중 · 선을 위·아래로 끌면 cm 단위로 바뀝니다
           </p>
         </div>
         <div className="grid gap-4 content-start">
@@ -110,8 +126,24 @@ export function FeedbackPage() {
               ))}
             </div>
           </div>
-          <div className="border border-line rounded-3xl p-4">
-            <SliderControl label="앞머리 길이" display={bangLabel(bang)} value={bang} onChange={(v) => set({ bang: v })} />
+          <div className="border border-line rounded-3xl p-4 grid gap-4">
+            <div>
+              <SliderControl label="앞머리 길이" display={bangLabel(bang)} value={bang} onChange={(v) => set({ bang: v })} color={FRINGE_LINE_COLOR} />
+              <div className="flex gap-2 flex-wrap mt-2">
+                {BANG_QUICK.map((b) => (
+                  <Chip key={b.label} active={Math.abs(bang - b.v) < 8} onClick={() => set({ bang: b.v })}>{b.label}</Chip>
+                ))}
+              </div>
+            </div>
+            <div className="border-t border-line pt-4">
+              <SliderControl label="옆머리 길이" display={sideLabel(sideLength ?? 50)} value={sideLength ?? 50} onChange={(v) => set({ sideLength: v })} color={SIDE_LINE_COLOR} />
+              <div className="flex gap-2 flex-wrap mt-2">
+                {SIDE_QUICK.map((b) => (
+                  <Chip key={b.label} active={Math.abs((sideLength ?? 50) - b.v) < 8} onClick={() => set({ sideLength: b.v })}>{b.label}</Chip>
+                ))}
+              </div>
+            </div>
+            <p className="text-[13px] text-muted">사진 위 가로선과 여기 슬라이더는 함께 움직여요. 둘 중 편한 쪽으로 조정하세요.</p>
           </div>
           <div className="border border-line rounded-3xl p-4">
             <p className="font-bold mb-2">고객 한마디 <span className="text-muted font-normal">(선택)</span></p>
@@ -129,11 +161,11 @@ export function FeedbackPage() {
 
 export function InterpretationPage() {
   const nav = useNavigate();
-  const { region, bang, quickEdits, sideHair, freeText } = useConsult();
+  const { bang, sideLength, quickEdits, sideHair, freeText } = useConsult();
   const cards = [
-    `${region ? REGION_LABEL[region.type] : '앞머리'} · ${bangLabel(bang)}`,
+    `앞머리 · ${bangLabel(bang)}`,
+    `옆머리 · ${sideLabel(sideLength ?? 50)} (${sideHair})`,
     ...(quickEdits.slice(0, 3).map((q) => `요청 · ${q}`)),
-    `옆머리 · ${sideHair}`
   ];
   return (
     <AppShell>
@@ -189,7 +221,7 @@ export function ComparisonPage() {
 
 export function FinalizePage() {
   const nav = useNavigate();
-  const { versions, chosenVersion, candidates, selectedCandidate, bang, sideHair, quickEdits, stylist, viewTab, set } = useConsult();
+  const { versions, chosenVersion, candidates, selectedCandidate, bang, sideLength, sideHair, quickEdits, stylist, viewTab, set } = useConsult();
   const v = versions.find((x) => x.id === chosenVersion) ?? versions[0];
   const cd = candidates.find((c) => c.id === selectedCandidate);
   return (
@@ -205,7 +237,7 @@ export function FinalizePage() {
         <p className="font-extrabold text-[20px]">{cd?.name ?? '소프트 레이어드'}</p>
         <ul className="mt-2 text-[15px] grid gap-1">
           <li>앞머리 · {bangLabel(bang)}</li>
-          <li>옆머리 · {stylist.sideControl} ({sideHair})</li>
+          <li>옆머리 · {sideLabel(sideLength ?? 50)} · {stylist.sideControl} ({sideHair})</li>
           <li>전체 · {quickEdits[0] ?? '가벼운 느낌'}</li>
         </ul>
       </div>
@@ -224,18 +256,24 @@ export function ReportPage() {
   const nav = useNavigate();
   const st = useConsult();
   const { addRecord, addCustomer, customers } = useDash();
+  const toast = useUi((s) => s.showToast);
   const v = st.versions.find((x) => x.id === st.chosenVersion) ?? st.versions[0];
-  const done = () => {
+  const done = async () => {
     const rec = {
       id: 'r' + Date.now(), customerName: st.customerName, date: new Date().toISOString().slice(0, 10),
       styleName: st.candidates.find((c) => c.id === st.selectedCandidate)?.name ?? '소프트 레이어드',
       views: v.views, intent: st.intent,
-      adjustments: [`앞머리 ${bangLabel(st.bang)}`, st.sideHair, ...st.quickEdits, ...st.stylist.notes],
+      adjustments: [`앞머리 ${bangLabel(st.bang)}`, `옆머리 ${sideLabel(st.sideLength ?? 50)}`, st.sideHair, ...st.quickEdits, ...st.stylist.notes],
       condition: st.condition
     };
-    addRecord(rec);
-    if (!customers.some((c) => c.name === st.customerName)) {
-      addCustomer({ id: 'c' + Date.now(), name: st.customerName, phone: st.customerPhone, lastVisit: rec.date, historyCount: 1 });
+    try {
+      await addRecord(rec);
+      if (!customers.some((c) => c.name === st.customerName)) {
+        await addCustomer({ id: 'c' + Date.now(), name: st.customerName, phone: st.customerPhone, lastVisit: rec.date, historyCount: 1 });
+      }
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '저장에 실패했어요. 다시 시도해주세요.');
+      return;
     }
     st.reset();
     nav('/dashboard');

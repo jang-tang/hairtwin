@@ -1,8 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, Link, useParams } from 'react-router-dom';
-import { AppShell, PrimaryButton, SecondaryButton, PageHeader, Chip } from '../components/ui';
+import { AppShell, PrimaryButton, SecondaryButton, PageHeader, Chip, Segmented } from '../components/ui';
 import { useAuth, useDash, useUi } from '../stores/baseStores';
 import { useConsult } from '../stores/consultationStore';
+import {
+  usePresets, presetSummary, MAX_REF_IMAGES,
+  PRESET_CATEGORIES, PRESET_LENGTHS, PRESET_BANGS, PRESET_PERMS, PRESET_COLORS,
+} from '../stores/presetStore';
 import { PRESETS, img } from '../data';
 import { mockPortrait } from '../mocks/mockImages';
 
@@ -10,7 +14,21 @@ export function LoginPage() {
   const nav = useNavigate();
   const login = useAuth((s) => s.login);
   const [name, setName] = useState('지수 디자이너');
-  const start = () => { login(name || undefined); nav('/dashboard'); };
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const start = async () => {
+    if (busy) return;
+    setBusy(true);
+    setErr('');
+    try {
+      await login(name || undefined);
+      nav('/dashboard');
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '로그인에 실패했어요. 다시 시도해주세요.');
+    } finally {
+      setBusy(false);
+    }
+  };
   const shots = [
     { v: 'front' as const, t: '앞모습으로 제안' },
     { v: 'side' as const, t: '옆선까지 확인' },
@@ -87,11 +105,12 @@ export function LoginPage() {
               <input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') start(); }}
                 placeholder="지수 디자이너"
                 className="flex-1 min-h-[52px] rounded-2xl px-4 text-[16px] text-ink bg-white outline-none focus:ring-2 focus:ring-primary" />
-              <button onClick={start}
-                className="min-h-[52px] px-7 rounded-2xl bg-primary hover:bg-primaryDark font-bold text-[16px] transition active:scale-[.98] whitespace-nowrap">
-                시작하기
+              <button onClick={start} disabled={busy}
+                className="min-h-[52px] px-7 rounded-2xl bg-primary hover:bg-primaryDark font-bold text-[16px] transition active:scale-[.98] whitespace-nowrap disabled:opacity-60">
+                {busy ? '접속 중…' : '시작하기'}
               </button>
             </div>
+            {err && <p className="text-warning text-[14px] mt-2">{err}</p>}
             <p className="text-white/40 text-[13px] mt-3">데모 환경 · 입력한 이름으로 인사말이 표시됩니다</p>
           </div>
           <div className="hidden sm:block">
@@ -110,15 +129,24 @@ export function LoginPage() {
 export function DashboardPage() {
   const nav = useNavigate();
   const designer = useAuth((s) => s.designer);
-  const { customers, records } = useDash();
+  const serverMode = useAuth((s) => s.serverMode);
+  const { customers, records, status, error, refresh } = useDash();
   const reset = useConsult((s) => s.reset);
   const [q, setQ] = useState('');
+  useEffect(() => { void refresh(); }, [refresh]);
   const filtered = customers.filter((c) => c.name.includes(q));
   return (
     <AppShell>
       <section className="bg-primaryPale border border-line rounded-3xl p-6 sm:p-8 mb-6">
         <h1 className="text-[26px] font-bold">안녕하세요, {designer}님.</h1>
         <p className="text-secondary text-[16px] mt-1">오늘도 좋은 상담을 시작해볼까요?</p>
+        {status === 'loading' && <p className="text-secondary text-[14px] mt-2">목록을 불러오는 중…</p>}
+        {status === 'offline' && (
+          <p className="text-secondary text-[14px] mt-2">서버 없이 오프라인으로 동작 중이에요. {serverMode ? '' : '(이 기기에만 저장됩니다)'}</p>
+        )}
+        {status === 'error' && (
+          <p className="text-error text-[14px] mt-2">{error ?? '목록을 불러오지 못했어요.'} <button className="underline font-semibold" onClick={() => void refresh()}>다시 시도</button></p>
+        )}
         <div className="mt-5 flex flex-col sm:flex-row gap-3">
           <PrimaryButton onClick={() => { reset(); nav('/consultations/new/start'); }}>+ 새 고객 상담</PrimaryButton>
           <SecondaryButton onClick={() => nav('/customers')}>고객 찾기</SecondaryButton>
@@ -280,11 +308,86 @@ export function RecordDetailPage() {
 }
 
 export function PresetsPage() {
-  const my = useConsult((s) => s.myPresets);
+  const nav = useNavigate();
+  const presets = usePresets((s) => s.presets);
+  const status = usePresets((s) => s.status);
+  const presetError = usePresets((s) => s.error);
+  const refresh = usePresets((s) => s.refresh);
+  const removePreset = usePresets((s) => s.removePreset);
   const toast = useUi((s) => s.showToast);
+  const [confirmId, setConfirmId] = useState<string | null>(null);
+  useEffect(() => { void refresh(); }, [refresh]);
+  const doRemove = async (id: string) => {
+    try {
+      await removePreset(id);
+      setConfirmId(null);
+      toast('프리셋을 삭제했어요.');
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '삭제에 실패했어요.');
+    }
+  };
   return (
     <AppShell>
-      <PageHeader title="스타일 프리셋" sub="마음에 드는 스타일을 눌러보세요. 미용실 전용으로 관리됩니다." />
+      <PageHeader title="스타일 프리셋" sub="매장에서 자주 쓰는 스타일을 저장해두고 상담 때 바로 꺼내 쓰세요." />
+      <div className="mb-4"><SecondaryButton to="/presets/new">+ 프리셋 등록하기</SecondaryButton></div>
+      {status === 'loading' && <p className="text-secondary text-[14px] mb-3">프리셋을 불러오는 중…</p>}
+      {status === 'error' && (
+        <p className="text-error text-[14px] mb-3">{presetError ?? '프리셋을 불러오지 못했어요.'} <button className="underline font-semibold" onClick={() => void refresh()}>다시 시도</button></p>
+      )}
+
+      <h3 className="font-bold mb-2">내 프리셋 {presets.length > 0 && <span className="text-primary">· {presets.length}</span>}</h3>
+      {presets.length === 0 ? (
+        <div className="mb-6"><EmptyBox msg="등록된 프리셋이 없습니다. 옵션과 참고 사진을 넣어 나만의 프리셋을 만들어보세요." cta="프리셋 등록하기" to="/presets/new" /></div>
+      ) : (
+        <div className="grid sm:grid-cols-2 gap-3 mb-6">
+          {presets.map((m) => (
+            <div key={m.id} className="border border-primary/40 bg-primarySoft/40 rounded-2xl overflow-hidden">
+              <div className="flex gap-3 p-3">
+                {m.refImages.length > 0 ? (
+                  <img src={m.refImages[0]} alt={m.name} className="w-20 h-24 rounded-xl object-cover border border-line shrink-0" />
+                ) : (
+                  <div className="w-20 h-24 rounded-xl bg-softBg border border-dashed border-line flex items-center justify-center text-[26px] shrink-0">💇</div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="font-bold text-[17px] truncate">{m.name}</p>
+                  <p className="text-[13px] text-secondary truncate">{presetSummary(m)}</p>
+                  {m.desc && <p className="text-[13px] text-muted truncate mt-0.5">{m.desc}</p>}
+                  {m.refImages.length > 1 && <p className="text-[12px] text-muted mt-0.5">참고 사진 {m.refImages.length}장</p>}
+                </div>
+              </div>
+              {confirmId === m.id ? (
+                <div className="px-3 pb-3 flex gap-2">
+                  <p className="text-[14px] font-semibold flex-1 self-center">정말 삭제할까요?</p>
+                  <button
+                    onClick={() => void doRemove(m.id)}
+                    className="min-h-[44px] px-4 rounded-xl bg-error text-white text-[14px] font-bold"
+                  >
+                    삭제
+                  </button>
+                  <button onClick={() => setConfirmId(null)} className="min-h-[44px] px-4 rounded-xl border border-line text-[14px] font-semibold">취소</button>
+                </div>
+              ) : (
+                <div className="px-3 pb-3 flex gap-2">
+                  <button
+                    onClick={() => toast(`'${m.name}' 프리셋을 상담에 사용합니다.`)}
+                    className="flex-1 min-h-[44px] rounded-xl bg-primary text-white text-[14px] font-bold active:scale-[.98]"
+                  >
+                    사용
+                  </button>
+                  <button
+                    onClick={() => nav(`/presets/${m.id}/edit`)}
+                    className="flex-1 min-h-[44px] rounded-xl border border-line bg-white text-[14px] font-semibold"
+                  >
+                    수정
+                  </button>
+                  <button onClick={() => setConfirmId(m.id)} className="min-h-[44px] px-4 rounded-xl border border-line text-error text-[14px] font-semibold">삭제</button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
       <h3 className="font-bold mb-2">기본 프리셋</h3>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
         {PRESETS.map((p) => (
@@ -294,41 +397,212 @@ export function PresetsPage() {
           </div>
         ))}
       </div>
-      <h3 className="font-bold mb-2">내 프리셋</h3>
-      {my.length === 0 ? <EmptyBox msg="나만의 스타일 프리셋을 만들어보세요." cta="프리셋 추가" to="/presets/new" /> : (
-        <div className="grid gap-2">{my.map((m) => (
-          <div key={m.id} className="border border-primary bg-primarySoft rounded-2xl p-4 flex justify-between">
-            <span className="font-bold">{m.name}</span>
-            <button className="text-primary font-semibold" onClick={() => toast('프리셋이 적용되었습니다.')}>사용</button>
-          </div>
-        ))}</div>
-      )}
-      <div className="mt-4"><SecondaryButton to="/presets/new">+ 프리셋 추가</SecondaryButton></div>
     </AppShell>
+  );
+}
+
+function readFilesAsDataUrls(files: FileList | File[]): Promise<string[]> {
+  const list = Array.from(files);
+  return Promise.all(
+    list.map(
+      (f) =>
+        new Promise<string>((resolve, reject) => {
+          const r = new FileReader();
+          r.onload = () => resolve(String(r.result));
+          r.onerror = reject;
+          r.readAsDataURL(f);
+        })
+    )
   );
 }
 
 export function PresetEditPage() {
   const nav = useNavigate();
-  const my = useConsult((s) => s.myPresets);
-  const set = useConsult((s) => s.set);
-  const [name, setName] = useState('');
-  const [tag, setTag] = useState('레이어드');
+  const { presetId } = useParams();
+  const isEdit = Boolean(presetId);
+  const existing = usePresets((s) => s.presets.find((x) => x.id === presetId));
+  const addPreset = usePresets((s) => s.addPreset);
+  const updatePreset = usePresets((s) => s.updatePreset);
+  const removePreset = usePresets((s) => s.removePreset);
+  const toast = useUi((s) => s.showToast);
+
+  const [name, setName] = useState(existing?.name ?? '');
+  const [desc, setDesc] = useState(existing?.desc ?? '');
+  const [category, setCategory] = useState(existing?.category ?? '레이어드');
+  const [length, setLength] = useState(existing?.length ?? '미디움');
+  const [bang, setBang] = useState(existing?.bang ?? '시스루뱅');
+  const [perm, setPerm] = useState(existing?.perm ?? '직모');
+  const [color, setColor] = useState(existing?.color ?? '염색 없음');
+  const [memo, setMemo] = useState(existing?.memo ?? '');
+  const [refImages, setRefImages] = useState<string[]>(existing?.refImages ?? []);
+  const [busy, setBusy] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  useEffect(() => {
+    if (isEdit && !existing) nav('/presets');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presetId]);
+
+  const onFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const remain = MAX_REF_IMAGES - refImages.length;
+    if (remain <= 0) {
+      toast(`참고 사진은 최대 ${MAX_REF_IMAGES}장까지 첨부할 수 있어요.`);
+      return;
+    }
+    setBusy(true);
+    try {
+      const urls = await readFilesAsDataUrls(Array.from(files).slice(0, remain));
+      setRefImages((prev) => [...prev, ...urls].slice(0, MAX_REF_IMAGES));
+      if (files.length > remain) toast(`최대 ${MAX_REF_IMAGES}장까지만 추가했어요.`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const save = async () => {
+    if (!name.trim()) {
+      toast('프리셋 이름을 입력해주세요.');
+      return;
+    }
+    const payload = {
+      name: name.trim(),
+      desc: desc.trim(),
+      category, length, bang, perm, color,
+      memo: memo.trim(),
+      refImages,
+    };
+    try {
+      if (isEdit && existing) {
+        await updatePreset(existing.id, payload);
+        toast('프리셋을 수정했어요.');
+      } else {
+        await addPreset(payload);
+        toast('프리셋을 등록했어요.');
+      }
+      nav('/presets');
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '저장에 실패했어요.');
+    }
+  };
+
   return (
     <AppShell>
-      <PageHeader title="프리셋 만들기" sub="선택과 업로드만으로 끝나요. 긴 설명은 필요 없어요." />
-      <label className="font-semibold text-[15px]">프리셋 이름 (선택)</label>
-      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="예: 시그니처 허쉬"
-        className="w-full min-h-[52px] border border-line rounded-2xl px-4 mt-2 mb-4" />
-      <p className="font-semibold text-[15px] mb-2">대표 태그 고르기</p>
-      <div className="flex gap-2 flex-wrap mb-4">
-        {['댄디', '레이어드', '허쉬', '보브', '웨이브'].map((t) => (
-          <Chip key={t} active={tag === t} onClick={() => setTag(t)}>{t}</Chip>
-        ))}
+      <PageHeader
+        title={isEdit ? '프리셋 수정하기' : '프리셋 등록하기'}
+        sub="옵션을 고르고 참고 사진을 첨부하면 상담 때 바로 꺼내 쓸 수 있어요."
+      />
+
+      <div className="border border-line rounded-3xl p-5 mb-4">
+        <label className="font-bold text-[16px]">프리셋 이름 <span className="text-error">*</span></label>
+        <input
+          value={name} onChange={(e) => setName(e.target.value)} placeholder="예: 시그니처 허쉬"
+          className="w-full min-h-[52px] border border-line rounded-2xl px-4 mt-2" maxLength={30}
+        />
+        <label className="font-bold text-[16px] block mt-4">한 줄 설명</label>
+        <input
+          value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="예: 가볍고 자연스러운 옆라인"
+          className="w-full min-h-[52px] border border-line rounded-2xl px-4 mt-2" maxLength={60}
+        />
       </div>
-      <PrimaryButton onClick={() => { set({ myPresets: [...my, { id: 'my' + Date.now(), name: name || `나의 ${tag}` }] }); nav('/presets'); }}>
-        저장하기
-      </PrimaryButton>
+
+      <div className="border border-line rounded-3xl p-5 mb-4">
+        <p className="font-bold text-[16px] mb-2">대표 스타일</p>
+        <div className="flex gap-2 flex-wrap">
+          {PRESET_CATEGORIES.map((t) => (
+            <Chip key={t} active={category === t} onClick={() => setCategory(t)}>{t}</Chip>
+          ))}
+        </div>
+      </div>
+
+      <div className="border border-line rounded-3xl p-5 mb-4 grid gap-4">
+        <div>
+          <p className="font-bold text-[16px] mb-2">기장</p>
+          <Segmented options={PRESET_LENGTHS} value={length} onChange={setLength} />
+        </div>
+        <div>
+          <p className="font-bold text-[16px] mb-2">앞머리</p>
+          <Segmented options={PRESET_BANGS} value={bang} onChange={setBang} />
+        </div>
+        <div>
+          <p className="font-bold text-[16px] mb-2">펌·볼륨</p>
+          <Segmented options={PRESET_PERMS} value={perm} onChange={setPerm} />
+        </div>
+        <div>
+          <p className="font-bold text-[16px] mb-2">컬러</p>
+          <Segmented options={PRESET_COLORS} value={color} onChange={setColor} />
+        </div>
+      </div>
+
+      <div className="border border-line rounded-3xl p-5 mb-4">
+        <div className="flex items-center justify-between mb-2">
+          <p className="font-bold text-[16px]">참고 사진 <span className="text-muted font-normal text-[14px]">({refImages.length}/{MAX_REF_IMAGES})</span></p>
+          <label className={`text-[14px] font-bold rounded-full px-4 min-h-[40px] inline-flex items-center cursor-pointer ${busy ? 'bg-line text-muted' : 'bg-ink text-white'}`}>
+            {busy ? '불러오는 중…' : '+ 사진 첨부'}
+            <input type="file" accept="image/*" multiple className="hidden" disabled={busy} onChange={(e) => { void onFiles(e.target.files); e.target.value = ''; }} />
+          </label>
+        </div>
+        <p className="text-secondary text-[14px] mb-3">완성 사진이나 원하는 분위기의 사진을 첨부해주세요. 상담 화면에서 함께 볼 수 있어요.</p>
+        {refImages.length === 0 ? (
+          <div className="border border-dashed border-line rounded-2xl p-6 text-center text-secondary bg-softBg text-[14px]">
+            아직 첨부된 사진이 없습니다.
+          </div>
+        ) : (
+          <div className="grid grid-cols-3 gap-2">
+            {refImages.map((src, i) => (
+              <div key={i} className="relative rounded-2xl overflow-hidden border border-line">
+                <img src={src} alt={`참고 ${i + 1}`} className="w-full aspect-square object-cover" />
+                <button
+                  onClick={() => setRefImages((prev) => prev.filter((_, idx) => idx !== i))}
+                  className="absolute top-1.5 right-1.5 w-8 h-8 rounded-full bg-black/70 text-white text-[16px] font-bold"
+                  aria-label={`참고 사진 ${i + 1} 삭제`}
+                >
+                  ×
+                </button>
+                {i === 0 && <span className="absolute bottom-1.5 left-1.5 bg-primary text-white text-[12px] font-bold px-2 py-0.5 rounded-full">대표</span>}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="border border-line rounded-3xl p-5 mb-5">
+        <label className="font-bold text-[16px]">시술 메모 <span className="text-muted font-normal">(선택)</span></label>
+        <textarea
+          value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="예: 옆머리 다운펌 10분 · 앞머리 눈썹선 기준"
+          className="w-full min-h-[88px] border border-line rounded-2xl px-4 py-3 mt-2 text-[15px]" maxLength={300}
+        />
+      </div>
+
+      <div className="grid gap-2">
+        <PrimaryButton onClick={save}>{isEdit ? '수정 완료' : '프리셋 등록'}</PrimaryButton>
+        <SecondaryButton onClick={() => nav('/presets')}>취소</SecondaryButton>
+        {isEdit && existing && (
+          confirmDelete ? (
+            <div className="flex gap-2">
+              <button onClick={() => {
+                void (async () => {
+                  try {
+                    await removePreset(existing.id);
+                    toast('프리셋을 삭제했어요.');
+                    nav('/presets');
+                  } catch (e) {
+                    toast(e instanceof Error ? e.message : '삭제에 실패했어요.');
+                  }
+                })();
+              }}
+                className="flex-1 min-h-[52px] rounded-2xl bg-error text-white font-bold">
+                정말 삭제하기
+              </button>
+              <div className="flex-1"><SecondaryButton onClick={() => setConfirmDelete(false)}>돌아가기</SecondaryButton></div>
+            </div>
+          ) : (
+            <button onClick={() => setConfirmDelete(true)} className="min-h-[52px] rounded-2xl text-error font-semibold text-[15px]">
+              이 프리셋 삭제하기
+            </button>
+          )
+        )}
+      </div>
     </AppShell>
   );
 }

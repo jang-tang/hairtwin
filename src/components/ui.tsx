@@ -1,6 +1,6 @@
 import React from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { useAuth } from '../stores/baseStores';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { useAuth, useUi } from '../stores/baseStores';
 
 export function PrimaryButton({ children, onClick, to, disabled }: { children: React.ReactNode; onClick?: () => void; to?: string; disabled?: boolean }) {
   const cls = `min-h-[52px] px-8 rounded-2xl text-[17px] font-semibold text-white transition active:scale-[.98] flex items-center justify-center gap-2 ${disabled ? 'bg-line text-muted cursor-not-allowed' : 'bg-primary hover:bg-primaryDark shadow-[0_6px_20px_rgba(255,74,93,.3)]'}`;
@@ -32,13 +32,13 @@ export function Segmented<T extends string>({ options, value, onChange }: { opti
     </div>
   );
 }
-export function SliderControl({ value, onChange, label, display }: { value: number; onChange: (v: number) => void; label: string; display?: string }) {
+export function SliderControl({ value, onChange, label, display, color }: { value: number; onChange: (v: number) => void; label: string; display?: string; color?: string }) {
   return (
     <div>
-      <div className="flex justify-between items-center text-[15px] mb-2"><span className="font-semibold">{label}</span><span className="text-primary font-bold">{display ?? value}</span></div>
+      <div className="flex justify-between items-center text-[15px] mb-2"><span className="font-semibold">{label}</span><span className="font-bold" style={color ? { color } : { color: '#FF4A5D' }}>{display ?? value}</span></div>
       <div className="flex items-center gap-3">
         <span className="text-sm text-muted whitespace-nowrap">짧게</span>
-        <input type="range" min={0} max={100} value={value} style={{ ['--fill' as string]: `${value}%` }}
+        <input type="range" min={0} max={100} value={value} style={color ? { ['--fill' as string]: `${value}%`, background: `linear-gradient(to right, ${color} ${value}%, #E4E4E7 ${value}%)` } : { ['--fill' as string]: `${value}%` }}
           onChange={(e) => onChange(Number(e.target.value))}
           className="ht-slider flex-1 h-8" aria-label={label} />
         <span className="text-sm text-muted whitespace-nowrap">길게</span>
@@ -64,22 +64,42 @@ export function PageHeader({ title, sub, step, total }: { title: string; sub: st
 }
 export function AppShell({ children }: { children: React.ReactNode }) {
   const nav = useNavigate();
+  const loc = useLocation();
   const { designer, logout } = useAuth();
+  const toast = useUi((s) => s.toast);
+  const onPresets = loc.pathname.startsWith('/presets');
   return (
     <div className="min-h-full bg-white">
       <header className="sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-line">
-        <div className="max-w-[1024px] mx-auto px-5 h-[64px] flex items-center justify-between">
-          <button onClick={() => nav('/dashboard')} className="flex items-center gap-2">
+        <div className="max-w-[1024px] mx-auto px-5 h-[64px] flex items-center justify-between gap-2">
+          <button onClick={() => nav('/dashboard')} className="flex items-center gap-2 shrink-0">
             <span className="w-8 h-8 rounded-xl bg-primary text-white font-black flex items-center justify-center text-[18px]">H</span>
             <span className="font-extrabold text-[19px] tracking-tight">Hair Twin</span>
           </button>
-          <div className="flex items-center gap-3">
-            <span className="text-[14px] text-secondary hidden sm:block">{designer}</span>
+          <nav className="flex items-center gap-2">
+            <Link
+              to="/presets"
+              className={`text-[14px] font-bold rounded-full px-4 min-h-[36px] flex items-center border transition ${onPresets && loc.pathname === '/presets' ? 'bg-ink text-white border-ink' : 'border-line text-secondary'}`}
+            >
+              프리셋
+            </Link>
+            <Link
+              to="/presets/new"
+              className={`text-[14px] font-bold rounded-full px-4 min-h-[36px] flex items-center transition active:scale-95 ${loc.pathname === '/presets/new' ? 'bg-primaryDark text-white' : 'bg-primary text-white'}`}
+            >
+              + 프리셋 등록
+            </Link>
+            <span className="text-[14px] text-secondary hidden md:block ml-1">{designer}</span>
             <button onClick={() => { logout(); nav('/login'); }} className="text-[14px] text-muted border border-line rounded-full px-4 min-h-[36px]">로그아웃</button>
-          </div>
+          </nav>
         </div>
       </header>
       <main className="max-w-[1024px] mx-auto px-5 py-6 pb-28">{children}</main>
+      {toast && (
+        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 bg-ink text-white text-[15px] font-semibold px-5 py-3 rounded-2xl shadow-lg ht-fade whitespace-nowrap">
+          {toast}
+        </div>
+      )}
     </div>
   );
 }
