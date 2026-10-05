@@ -77,6 +77,32 @@ const MIGRATIONS: { version: number; name: string; sql: string }[] = [
     CREATE INDEX IF NOT EXISTS idx_records_customer ON consultation_records(customer_id, created_at DESC);
     `,
   },
+  {
+    version: 2,
+    name: 'ai_sessions_and_versions',
+    sql: `
+    CREATE TABLE ai_sessions (
+      id TEXT PRIMARY KEY,
+      designer_id TEXT NOT NULL REFERENCES designers(id),
+      request_id TEXT NOT NULL,
+      input_json TEXT NOT NULL,
+      candidates_json TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      UNIQUE(designer_id, request_id)
+    );
+    CREATE TABLE ai_versions (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES ai_sessions(id),
+      request_id TEXT NOT NULL,
+      version_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      UNIQUE(session_id, request_id)
+    );
+    ALTER TABLE consultation_records ADD COLUMN ai_session_id TEXT REFERENCES ai_sessions(id);
+    ALTER TABLE consultation_records ADD COLUMN selected_version_id TEXT REFERENCES ai_versions(id);
+    `,
+  },
 ];
 
 let db: DatabaseSync | null = null;

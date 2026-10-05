@@ -7,6 +7,7 @@
  */
 import type { ConsultationRecord, Customer } from '../types';
 import type { StylistPreset } from '../stores/presetStore';
+import type { GenerateInput, GenerationResult, EditRequest, EditResult } from '../../server/src/providers/image/types';
 
 const BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? '/api';
 const TOKEN_KEY = 'ht-token';
@@ -36,10 +37,13 @@ export function clearToken(): void {
 export class ApiError extends Error {
   status: number;
   code: string;
-  constructor(status: number, code: string, message: string) {
-    super(message);
+  requestId?: string;
+  constructor(status: number, code: string, message: string, requestId?: string) {
+    const safeId = requestId && /^[0-9a-f-]{36}$/i.test(requestId) ? requestId : undefined;
+    super(message + (safeId ? ` (오류 ID: ${safeId})` : ''));
     this.status = status;
     this.code = code;
+    this.requestId = safeId;
   }
 }
 
@@ -53,16 +57,23 @@ async function request<T>(path: string, init: RequestInit = {}, auth = true): Pr
   try {
     res = await fetch(`${BASE}${path}`, { ...init, headers: { ...headers, ...(init.headers as Record<string, string>) } });
   } catch {
+    console.error('[api.failed]', { path: path.split('?')[0], method: init.method ?? 'GET', status: 0, code: 'CONNECTION_FAILED' });
     throw new ApiError(0, 'CONNECTION_FAILED', '서버에 연결할 수 없습니다. 오프라인 모드로 동작합니다.');
   }
-  let json: { ok: boolean; data?: T; meta?: PageMeta; error?: { code: string; message: string } };
+  const headerId = res.headers.get('x-request-id') ?? undefined;
+  let json: { ok: boolean; data?: T; meta?: PageMeta; error?: { code: string; message: string; requestId?: string } };
   try {
     json = (await res.json()) as typeof json;
+    if (!json || typeof json !== 'object' || typeof json.ok !== 'boolean') throw new Error('Invalid API envelope');
   } catch {
-    throw new ApiError(res.status, 'BAD_RESPONSE', `서버 응답 오류 (${res.status})`);
+    const error = new ApiError(res.status, 'BAD_RESPONSE', `서버 응답 오류 (${res.status})`, headerId);
+    console.error('[api.failed]', { path: path.split('?')[0], method: init.method ?? 'GET', status: error.status, code: error.code, requestId: error.requestId });
+    throw error;
   }
   if (!res.ok || !json.ok) {
-    throw new ApiError(res.status, json.error?.code ?? 'REQUEST_FAILED', json.error?.message ?? `요청 실패 (${res.status})`);
+    const error = new ApiError(res.status, json.error?.code ?? 'REQUEST_FAILED', json.error?.message ?? `요청 실패 (${res.status})`, json.error?.requestId ?? headerId);
+    console.error('[api.failed]', { path: path.split('?')[0], method: init.method ?? 'GET', status: error.status, code: error.code, requestId: error.requestId });
+    throw error;
   }
   return json.data as T;
 }
@@ -103,6 +114,7 @@ export const api = {
   },
 
   records: {
+    get: (id: string) => request<ConsultationRecord>(`/records/${encodeURIComponent(id)}`),
     list: () => request<ConsultationRecord[]>(`/records?${new URLSearchParams({ limit: '100' })}`),
     create: (r: {
       customerId?: string;
@@ -113,17 +125,20 @@ export const api = {
       intent: string;
       adjustments: string[];
       condition: ConsultationRecord['condition'];
+      sessionId?: string;
+      selectedVersionId?: string;
     }) => request<ConsultationRecord>('/records', { method: 'POST', body: JSON.stringify(r) }),
   },
 
   ai: {
-    generate: (body: { prompt?: string; presetId?: string; customerName?: string }) =>
-      request<{ candidates: { id: string; name: string; desc: string; views: { front: string; side: string; back: string } }[]; mock: boolean; provider: string }>(
+    session: (id: string) => request<GenerationResult>(`/ai/sessions/${encodeURIComponent(id)}`),
+    generate: (body: GenerateInput) =>
+      request<GenerationResult>(
         '/ai/generate',
         { method: 'POST', body: JSON.stringify(body) }
       ),
-    edit: (body: { image: string; region: unknown; bang: number; sideLength?: number; sideHair?: string; condition?: unknown; feedback: string[] }) =>
-      request<{ ok: boolean; mock: boolean; summary: string; provider: string }>('/ai/edit', {
+    edit: (body: EditRequest) =>
+      request<EditResult>('/ai/edit', {
         method: 'POST',
         body: JSON.stringify(body),
       }),

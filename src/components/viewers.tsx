@@ -52,9 +52,9 @@ export function DraggableRegion({ image, region, onChange, guides }: { image: st
     const p = toNorm(e.clientX, e.clientY);
     const dx = p.nx - drag.sx, dy = p.ny - drag.sy;
     if (drag.mode === 'move') {
-      onChange({ ...region, x: Math.min(0.95, Math.max(0, drag.ox + dx)), y: Math.min(0.95, Math.max(0, drag.oy + dy)) });
+      onChange({ ...region, x: Math.min(1 - region.w, Math.max(0, drag.ox + dx)), y: Math.min(1 - region.h, Math.max(0, drag.oy + dy)) });
     } else {
-      onChange({ ...region, w: Math.min(0.95, Math.max(0.08, drag.ow + dx)), h: Math.min(0.95, Math.max(0.08, drag.oh + dy)) });
+      onChange({ ...region, w: Math.min(1 - region.x, Math.max(0.08, drag.ow + dx)), h: Math.min(1 - region.y, Math.max(0.08, drag.oh + dy)) });
     }
   };
   const end = () => setDrag(null);
@@ -76,7 +76,7 @@ export function DraggableRegion({ image, region, onChange, guides }: { image: st
 
   return (
     <div ref={boxRef} className="relative rounded-2xl overflow-hidden border border-line bg-softBg select-none touch-none">
-      <img src={image} alt="style" className="w-full aspect-[4/4.4] object-cover pointer-events-none" draggable={false} />
+      <img src={image} alt="style" className="w-full h-auto pointer-events-none" draggable={false} />
       <div
         onPointerDown={start('move')} onPointerMove={move} onPointerUp={end}
         className="absolute border-[3px] border-primary rounded-xl bg-primary/10 cursor-grab active:cursor-grabbing"

@@ -1,3 +1,5 @@
+import type { ErrorDiagnostics } from './errorLog.js';
+
 export interface ApiOk<T> {
   ok: true;
   data: T;
@@ -20,11 +22,13 @@ export class AppError extends Error {
   status: number;
   code: string;
   details?: unknown;
-  constructor(status: number, code: string, message: string, details?: unknown) {
+  diagnostics?: ErrorDiagnostics;
+  constructor(status: number, code: string, message: string, details?: unknown, diagnostics?: ErrorDiagnostics) {
     super(message);
     this.status = status;
     this.code = code;
     this.details = details;
+    this.diagnostics = diagnostics;
   }
 }
 

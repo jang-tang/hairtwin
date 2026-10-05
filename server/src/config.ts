@@ -18,6 +18,7 @@ export const config = {
   aiProvider: process.env.AI_PROVIDER ?? 'mock',
   // real AI provider용 (없으면 mock으로 폴백)
   openaiApiKey: process.env.OPENAI_API_KEY ?? '',
+  imageModel: process.env.OPENAI_IMAGE_MODEL ?? 'gpt-image-1',
   corsOrigin: (process.env.CORS_ORIGIN ?? 'http://localhost:5173').split(',').map((s) => s.trim()),
   seedDemo: (process.env.SEED_DEMO ?? 'true') === 'true',
 };

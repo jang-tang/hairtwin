@@ -23,6 +23,8 @@ export interface RecordRow {
   intent: string;
   adjustments: string;
   condition_json: string | null;
+  ai_session_id: string | null;
+  selected_version_id: string | null;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
@@ -38,6 +40,8 @@ export interface PublicRecord {
   intent: string;
   adjustments: string[];
   condition: HairCondition | null;
+  sessionId?: string;
+  selectedVersionId?: string;
 }
 
 export function toPublicRecord(r: RecordRow): PublicRecord {
@@ -51,6 +55,8 @@ export function toPublicRecord(r: RecordRow): PublicRecord {
     intent: r.intent,
     adjustments: fromJson<string[]>(r.adjustments, []),
     condition: fromJson<HairCondition | null>(r.condition_json, null),
+    ...(r.ai_session_id ? { sessionId: r.ai_session_id } : {}),
+    ...(r.selected_version_id ? { selectedVersionId: r.selected_version_id } : {}),
   };
 }
 
@@ -63,6 +69,8 @@ export interface RecordInput {
   intent?: string;
   adjustments?: string[];
   condition?: HairCondition | null;
+  sessionId?: string;
+  selectedVersionId?: string;
 }
 
 export function countRecords(designerId: string, opts: { search: string; customerId: string }, db: DatabaseSync = getDb()): number {
@@ -132,8 +140,8 @@ export function createRecordTx(
   }
   const date = input.date ?? now.slice(0, 10);
   db.prepare(
-    `INSERT INTO consultation_records (id, designer_id, customer_id, customer_name, date, style_name, views, intent, adjustments, condition_json, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO consultation_records (id, designer_id, customer_id, customer_name, date, style_name, views, intent, adjustments, condition_json, created_at, updated_at, ai_session_id, selected_version_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id,
     designerId,
@@ -146,7 +154,9 @@ export function createRecordTx(
     toJson(input.adjustments ?? []),
     input.condition ? toJson(input.condition) : null,
     now,
-    now
+    now,
+    input.sessionId ?? null,
+    input.selectedVersionId ?? null
   );
   if (customerId) bumpCustomerStats(designerId, customerId, date, db);
   return db.prepare('SELECT * FROM consultation_records WHERE id = ?').get(id) as unknown as RecordRow;

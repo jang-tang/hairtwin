@@ -1,7 +1,10 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, createJSONStorage } from 'zustand/middleware';
+import { indexedStorage } from '../storage/indexedStorage';
 import type { Customer, ConsultationRecord } from '../types';
 import { api, clearToken, getToken, isOnlineError, setToken, ApiError } from '../api/server';
+import { useConsult } from './consultationStore';
+import { usePresets } from './presetStore';
 
 interface AuthState {
   designer: string;
@@ -13,7 +16,7 @@ interface AuthState {
 }
 export const useAuth = create<AuthState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       designer: '지수 디자이너',
       loggedIn: false,
       serverMode: false,
@@ -21,6 +24,11 @@ export const useAuth = create<AuthState>()(
         const display = name?.trim() || '지수 디자이너';
         try {
           const { token, designer } = await api.login(display);
+          if (get().designer !== designer.name) {
+            useConsult.getState().reset();
+            useDash.setState({ customers: [], records: [], status: 'idle', error: null });
+            usePresets.setState({ presets: [], status: 'idle', error: null });
+          }
           setToken(token);
           set({ loggedIn: true, designer: designer.name, serverMode: true });
         } catch (e) {
@@ -35,6 +43,9 @@ export const useAuth = create<AuthState>()(
       },
       logout: () => {
         clearToken();
+        useConsult.getState().reset();
+        useDash.setState({ customers: [], records: [], status: 'idle', error: null });
+        usePresets.setState({ presets: [], status: 'idle', error: null });
         set({ loggedIn: false });
       },
     }),
@@ -107,6 +118,8 @@ export const useDash = create<DashState>()(
               intent: r.intent,
               adjustments: r.adjustments,
               condition: r.condition,
+              sessionId: r.sessionId,
+              selectedVersionId: r.selectedVersionId,
             });
             await get().refresh();
             return;
@@ -119,6 +132,7 @@ export const useDash = create<DashState>()(
     }),
     {
       name: 'ht-dash',
+      storage: createJSONStorage(() => indexedStorage),
       partialize: (s) => ({ customers: s.customers, records: s.records }),
     }
   )

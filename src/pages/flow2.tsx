@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AppShell, PrimaryButton, SecondaryButton, PageHeader, Chip, SliderControl, NoConsult, Guard, MockBadge } from '../components/ui';
 import { DraggableRegion } from '../components/viewers';
@@ -6,7 +6,7 @@ import { useConsult, transitionTo, setRegionType, appendEditedVersion } from '..
 import { useDash, useUi } from '../stores/baseStores';
 import { REGION_LABEL, QUICK_OPTIONS, type RegionType } from '../types';
 import { bangLabel, sideLabel, BANG_QUICK, SIDE_QUICK, FRINGE_LINE_COLOR, SIDE_LINE_COLOR } from '../data';
-import { requestEdit, regionToMaskHint, isMockMode } from '../api/aiClient';
+import { requestEdit } from '../api/aiClient';
 
 // 영역 선택 → 보여줄 목업 방향 (앞머리=앞, 옆머리=옆, 뒷머리=뒤)
 const REGION_VIEW: Record<RegionType, 'front' | 'side' | 'back'> = {
@@ -16,16 +16,16 @@ const VIEW_KO = { front: '앞모습', side: '옆모습', back: '뒷모습' } as 
 
 export function CandidatesPage() {
   const nav = useNavigate();
-  const { candidates, selectedCandidate, set, viewTab } = useConsult();
+  const { candidates, selectedCandidate, selectCandidate, viewTab, aiMock } = useConsult();
   const list = candidates.length ? candidates : [];
   return (
     <AppShell>
       <Guard need={list.length > 0} fallback={<NoConsult />}>
         <PageHeader title="이 중 가장 마음에 드는 방향을 골라주세요." sub="각 후보의 앞·옆·뒤를 크게 볼 수 있어요." step={7} total={10} />
-        {isMockMode() && <div className="mb-3"><MockBadge /></div>}
+        {aiMock && <div className="mb-3"><MockBadge /></div>}
         <div className="grid gap-5">
           {list.map((cd) => (
-            <button key={cd.id} onClick={() => set({ selectedCandidate: cd.id })}
+            <button key={cd.id} onClick={() => selectCandidate(cd.id)}
               className={`text-left rounded-3xl border-[3px] overflow-hidden transition ${selectedCandidate === cd.id ? 'border-primary shadow-[0_10px_30px_rgba(255,74,93,.22)]' : 'border-line'}`}>
               <div className="p-4 flex items-center justify-between">
                 <div><p className="font-extrabold text-[19px]">후보 {cd.id} · {cd.name}</p><p className="text-secondary text-[14px]">{cd.desc}</p></div>
@@ -52,23 +52,30 @@ export function CandidatesPage() {
 
 export function FeedbackPage() {
   const nav = useNavigate();
-  const { candidates, selectedCandidate, region, set, bang, sideLength, quickEdits, freeText } = useConsult();
+  const { candidates, selectedCandidate, region, set, bang, sideLength, quickEdits, freeText, versions, chosenVersion, sessionId, condition, sideHair, aiMock } = useConsult();
   const toast = useUi((s) => s.showToast);
   const cd = candidates.find((c) => c.id === selectedCandidate) ?? candidates[0];
   const [busy, setBusy] = useState(false);
-  if (!cd) return <AppShell><NoConsult /></AppShell>;
+  const base = versions.find(v => v.id === chosenVersion);
+  const applying = useRef(false);
+  if (!cd || !base || !sessionId) return <AppShell><NoConsult /></AppShell>;
   const apply = async () => {
-    setBusy(true);
+    if (applying.current) return;
+    applying.current = true; setBusy(true);
     try {
-      const r = await requestEdit({ image: cd.views.front, region, bang, condition: null, sideHair: '', feedback: quickEdits });
-      void regionToMaskHint(region);
-      // V(n+1) 생성 → 비교 화면에서 이전 버전과 나란히 확인 (목업은 라벨에 조정값 반영)
-      appendEditedVersion();
-      toast(r.mock ? '목업으로 적용했어요. V비교에서 확인해보세요.' : '이렇게 이해했어요. 적용 중…');
+      const r = await requestEdit({
+        requestId: crypto.randomUUID(), sessionId, baseVersionId: base.id,
+        view: REGION_VIEW[region?.type ?? 'all'], region, bang, sideLength, condition, sideHair,
+        feedback: quickEdits, freeText,
+      });
+      if (useConsult.getState().sessionId !== sessionId) return;
+      appendEditedVersion(r.version);
+      toast(r.mock ? '목업 편집 결과를 저장했어요.' : '편집 결과를 새 버전으로 저장했어요.');
       transitionTo('interpretation', nav);
     } catch (e) {
       toast(e instanceof Error ? e.message : '적용에 실패했어요.');
     } finally {
+      applying.current = false;
       setBusy(false);
     }
   };
@@ -84,12 +91,13 @@ export function FeedbackPage() {
   };
   return (
     <AppShell>
-      <PageHeader title="여기서 조금 바꾸고 싶은 부분이 있나요?" sub="가로선을 끌어 앞머리·옆머리 기장을 직접 맞추세요." step={8} total={10} />
+      <PageHeader title="여기서 조금 바꾸고 싶은 부분이 있나요?" sub={`${base.label}에서 편집해요. 사각형 안의 머리만 변경하고 다른 방향도 함께 맞춰요.`} step={8} total={10} />
+      {aiMock && <div className="mb-3"><MockBadge /></div>}
       <div className="grid lg:grid-cols-[1.2fr_.8fr] gap-4">
         <div>
           {region && (
             <DraggableRegion
-              image={cd.views[shownView]} region={region} onChange={(r) => set({ region: r })}
+              image={base.views[shownView]} region={region} onChange={(r) => set({ region: r })}
               guides={[
                 { key: 'fringe', y: bang, color: FRINGE_LINE_COLOR, title: '앞머리', display: bangLabel(bang), onChange: (v) => set({ bang: v }) },
                 { key: 'side', y: sideLength ?? 50, color: SIDE_LINE_COLOR, title: '옆머리', display: sideLabel(sideLength ?? 50), onChange: (v) => set({ sideLength: v }) },
@@ -148,7 +156,7 @@ export function FeedbackPage() {
           <div className="border border-line rounded-3xl p-4">
             <p className="font-bold mb-2">고객 한마디 <span className="text-muted font-normal">(선택)</span></p>
             <input value={freeText} onChange={(e) => set({ freeText: e.target.value })}
-              placeholder="예: 앞머리는 눈썹 아래 2cm로 가볍게" className="w-full min-h-[52px] border border-line rounded-2xl px-4" />
+              maxLength={500} placeholder="예: 앞머리는 눈썹 아래 2cm로 가볍게" className="w-full min-h-[52px] border border-line rounded-2xl px-4" />
           </div>
           <PrimaryButton disabled={busy} onClick={apply}>{busy ? '적용 중…' : '이대로 적용'}</PrimaryButton>
           <SecondaryButton onClick={() => transitionTo('comparison', nav)}>바꾸고 싶은 곳 없어요 · 그대로 진행</SecondaryButton>
@@ -161,7 +169,7 @@ export function FeedbackPage() {
 
 export function InterpretationPage() {
   const nav = useNavigate();
-  const { bang, sideLength, quickEdits, sideHair, freeText } = useConsult();
+  const { bang, sideLength, quickEdits, sideHair, freeText, summary } = useConsult();
   const cards = [
     `앞머리 · ${bangLabel(bang)}`,
     `옆머리 · ${sideLabel(sideLength ?? 50)} (${sideHair})`,
@@ -169,7 +177,7 @@ export function InterpretationPage() {
   ];
   return (
     <AppShell>
-      <PageHeader title="이렇게 이해했어요." sub="맞으면 적용을 눌러주세요." step={8} total={10} />
+      <PageHeader title="요청한 내용을 반영했어요." sub={summary || '저장된 편집 결과를 비교해주세요.'} step={8} total={10} />
       <div className="grid gap-3 mb-4">
         {cards.map((c) => (
           <div key={c} className="border border-primary bg-primarySoft rounded-2xl p-4 font-bold text-[16px]">✓ {c}</div>
@@ -178,7 +186,7 @@ export function InterpretationPage() {
       </div>
       <div className="flex gap-2">
         <SecondaryButton onClick={() => transitionTo('feedback', nav)}>수정하기</SecondaryButton>
-        <div className="flex-1"><PrimaryButton onClick={() => transitionTo('comparison', nav)}>이대로 적용</PrimaryButton></div>
+        <div className="flex-1"><PrimaryButton onClick={() => transitionTo('comparison', nav)}>결과 비교</PrimaryButton></div>
       </div>
     </AppShell>
   );
@@ -186,34 +194,30 @@ export function InterpretationPage() {
 
 export function ComparisonPage() {
   const nav = useNavigate();
-  const { versions, chosenVersion, set, viewTab } = useConsult();
-  const v1 = versions[versions.length - 2] ?? versions[0];
-  const v2 = versions[versions.length - 1] ?? versions[0];
+  const { versions, selectedCandidate, chosenVersion, chooseVersion, viewTab, set, aiMock } = useConsult();
+  const list = versions.filter(v => v.candidateId === selectedCandidate);
+  if (!list.length) return <AppShell><NoConsult /></AppShell>;
   return (
     <AppShell>
-      <PageHeader title="조금 더 다듬어봤어요." sub={`${v1.label}와 ${v2.label} 중 더 마음에 드는 쪽을 눌러 선택해주세요.`} step={9} total={10} />
-      {isMockMode() && <div className="mb-3"><MockBadge /></div>}
+      <PageHeader title="이미지 버전을 비교해주세요." sub="이전 버전도 선택할 수 있어요. 선택한 버전에서 다시 편집할 수 있습니다." step={9} total={10} />
+      {aiMock && <div className="mb-3"><MockBadge /></div>}
+      <div className="flex gap-2 mb-3">{(['front','side','back'] as const).map((t,i) => (
+        <button key={t} onClick={() => set({ viewTab: t })} className={`flex-1 min-h-[48px] rounded-xl border font-bold ${viewTab === t ? 'bg-ink text-white' : 'border-line'}`}>{['앞','옆','뒤'][i]}</button>
+      ))}</div>
       <div className="grid sm:grid-cols-2 gap-4 mb-4">
-        {[v1, v2].map((v) => (
-          <button key={v.id} onClick={() => set({ chosenVersion: v.id })}
-            className={`rounded-3xl border-[3px] overflow-hidden text-left ${chosenVersion === v.id ? 'border-primary' : 'border-line'}`}>
+        {list.map(v => (
+          <button key={v.id} onClick={() => chooseVersion(v.id)} className={`rounded-3xl border-[3px] overflow-hidden text-left ${chosenVersion === v.id ? 'border-primary' : 'border-line'}`}>
             <p className="p-3 font-extrabold">{v.label} {chosenVersion === v.id ? '· 선택됨' : ''}</p>
-            <img src={viewTab === 'front' ? v.views.front : viewTab === 'side' ? v.views.side : v.views.back} alt={v.label} className="w-full aspect-[4/4.2] object-cover" />
-            <div className="grid grid-cols-3 gap-1 p-2">
-              {(['front', 'side', 'back'] as const).map((k) => <img key={k} src={v.views[k]} alt="" className="w-full aspect-square object-cover rounded-lg" />)}
-            </div>
+            <img src={v.views[viewTab]} alt={v.label} className="w-full aspect-square object-contain bg-softBg" />
+            <p className="p-3 text-[14px] text-secondary">{v.summary}</p>
+            <div className="grid grid-cols-3 gap-1 p-2">{(['front','side','back'] as const).map(k => <img key={k} src={v.views[k]} alt={k} className="w-full aspect-square object-contain rounded-lg" />)}</div>
           </button>
         ))}
       </div>
-      <div className="flex gap-2 mb-3">
-        {(['front', 'side', 'back'] as const).map((t, i) => (
-          <button key={t} onClick={() => set({ viewTab: t })}
-            className={`flex-1 min-h-[48px] rounded-xl border font-bold ${viewTab === t ? 'bg-ink text-white' : 'border-line'}`}>{['앞', '옆', '뒤'][i]}</button>
-        ))}
-      </div>
       <div className="grid gap-2">
-        <PrimaryButton onClick={() => transitionTo('finalize', nav)}>이대로 진행할게요 ({versions.find((x) => x.id === chosenVersion)?.label ?? v2.label} 선택됨)</PrimaryButton>
-        <SecondaryButton onClick={() => transitionTo('feedback', nav)}>조금 더 수정할래요</SecondaryButton>
+        <PrimaryButton onClick={() => transitionTo('finalize', nav)}>이대로 진행할게요 ({list.find(v => v.id === chosenVersion)?.label ?? '버전'} 선택됨)</PrimaryButton>
+        <SecondaryButton onClick={() => transitionTo('feedback', nav)}>선택한 버전에서 더 수정하기</SecondaryButton>
+        <SecondaryButton onClick={() => transitionTo('candidates', nav)}>다른 후보 보기</SecondaryButton>
       </div>
     </AppShell>
   );
@@ -224,6 +228,7 @@ export function FinalizePage() {
   const { versions, chosenVersion, candidates, selectedCandidate, bang, sideLength, sideHair, quickEdits, stylist, viewTab, set } = useConsult();
   const v = versions.find((x) => x.id === chosenVersion) ?? versions[0];
   const cd = candidates.find((c) => c.id === selectedCandidate);
+  if (!v) return <AppShell><NoConsult /></AppShell>;
   return (
     <AppShell>
       <PageHeader title="오늘 결정한 스타일" sub="고객과 화면을 함께 보며 확인해주세요." step={10} total={10} />
@@ -257,21 +262,28 @@ export function ReportPage() {
   const st = useConsult();
   const { addRecord, addCustomer, customers } = useDash();
   const toast = useUi((s) => s.showToast);
-  const v = st.versions.find((x) => x.id === st.chosenVersion) ?? st.versions[0];
+  const v = st.versions.find((x) => x.id === st.chosenVersion);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  if (!v) return <AppShell><NoConsult /></AppShell>;
   const done = async () => {
+    if (savingRef.current) return;
+    savingRef.current = true; setSaving(true);
     const rec = {
       id: 'r' + Date.now(), customerName: st.customerName, date: new Date().toISOString().slice(0, 10),
       styleName: st.candidates.find((c) => c.id === st.selectedCandidate)?.name ?? '소프트 레이어드',
       views: v.views, intent: st.intent,
       adjustments: [`앞머리 ${bangLabel(st.bang)}`, `옆머리 ${sideLabel(st.sideLength ?? 50)}`, st.sideHair, ...st.quickEdits, ...st.stylist.notes],
-      condition: st.condition
+      condition: v.settings.condition,
+      sessionId: st.sessionId ?? undefined, selectedVersionId: v.id,
     };
     try {
-      await addRecord(rec);
       if (!customers.some((c) => c.name === st.customerName)) {
         await addCustomer({ id: 'c' + Date.now(), name: st.customerName, phone: st.customerPhone, lastVisit: rec.date, historyCount: 1 });
       }
+      await addRecord(rec);
     } catch (e) {
+      savingRef.current = false; setSaving(false);
       toast(e instanceof Error ? e.message : '저장에 실패했어요. 다시 시도해주세요.');
       return;
     }
@@ -295,7 +307,7 @@ export function ReportPage() {
           </div>
         </div>
       </div>
-      <PrimaryButton onClick={done}>대시보드로 돌아가기</PrimaryButton>
+      <PrimaryButton disabled={saving} onClick={done}>{saving ? '상담 저장 중…' : '상담 저장하고 대시보드로'}</PrimaryButton>
     </AppShell>
   );
 }

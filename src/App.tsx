@@ -5,12 +5,14 @@ import { useAuth } from './stores/baseStores';
 import { LoginPage, DashboardPage, CustomersPage, CustomerDetailPage, RecordDetailPage, PresetsPage, PresetEditPage } from './pages/core';
 import { StartPage, IntentPage, PhotoPage, StylePage, ConditionPage, GenerationPage } from './pages/flow1';
 import { CandidatesPage, FeedbackPage, InterpretationPage, ComparisonPage, FinalizePage, ReportPage } from './pages/flow2';
-import { routeMap } from './stores/consultationStore';
+import { routeMap, useConsult } from './stores/consultationStore';
 
 function RequireAuth({ children }: { children: JSX.Element }) {
   const loggedIn = useAuth((s) => s.loggedIn);
   const loc = useLocation();
+  const hydrated = useConsult(s => s.hydrated);
   if (!loggedIn && loc.pathname !== '/login') return <Navigate to="/login" replace />;
+  if (!hydrated) return <AppShell><p>상담 데이터를 불러오는 중…</p></AppShell>;
   return children;
 }
 
