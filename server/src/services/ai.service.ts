@@ -14,46 +14,46 @@ function publicSession(s: repo.AiSession): GenerationResult {
   const { input: _, ...result } = s;
   return result;
 }
-export function getSession(designerId: string, id: string): GenerationResult {
-  const session = repo.findSession(designerId, id);
+export async function getSession(designerId: string, id: string): Promise<GenerationResult> {
+  const session = (await repo.findSession(designerId, id));
   if (!session) throw notFound('상담 이미지 세션을 찾을 수 없습니다.');
   return publicSession(session);
 }
-export function prepareGeneration(designerId: string, input: GenerateInput): GenerateInput {
+export async function prepareGeneration(designerId: string, input: GenerateInput): Promise<GenerateInput> {
   for (const view of VIEW_KEYS) readPng(input.photos[view]);
   let preset = input.preset;
   if (input.presetId && !builtinIds.has(input.presetId)) {
-    preset = { ...getPreset(designerId, input.presetId), refImages: input.preset.refImages ?? [] };
+    preset = { ...(await getPreset(designerId, input.presetId)), refImages: input.preset.refImages ?? [] };
   }
   for (const ref of preset.refImages ?? []) readPng(ref);
   return { ...input, preset };
 }
 export async function generate(designerId: string, input: GenerateInput, execution?: ImageExecution): Promise<GenerationResult> {
-  const existing = repo.findByRequest(designerId, input.requestId);
+  const existing = (await repo.findByRequest(designerId, input.requestId));
   if (existing) return publicSession(existing);
   const key = designerId + ':' + input.requestId;
   if (generating.has(key)) return generating.get(key)!;
   const task = (async () => {
     // Job input has already been resolved and frozen before its first image.
-    const resolved = execution ? input : prepareGeneration(designerId, input);
+    const resolved = execution ? input : (await prepareGeneration(designerId, input));
     const provider = getImageProvider(), out = await provider.generate(resolved, execution);
     execution?.signal.throwIfAborted();
     if (out.candidates.length !== 3) throw badRequest('후보 3개가 필요합니다.');
     for (const c of out.candidates) for (const view of VIEW_KEYS) readPng(c.views[view]);
-    return publicSession(repo.createSession(designerId, resolved, out.candidates, provider.kind));
+    return publicSession((await repo.createSession(designerId, resolved, out.candidates, provider.kind)));
   })();
   generating.set(key, task);
   try { return await task; } finally { generating.delete(key); }
 }
 export async function edit(designerId: string, input: EditRequest, execution?: ImageExecution): Promise<EditResult> {
-  const session = repo.findSession(designerId, input.sessionId);
+  const session = (await repo.findSession(designerId, input.sessionId));
   if (!session) throw notFound('상담 이미지 세션을 찾을 수 없습니다.');
   const base = session.versions.find(v => v.id === input.baseVersionId);
   if (!base) throw notFound('기준 이미지 버전을 찾을 수 없습니다.');
   const provider = getImageProvider();
   // Never switch an existing session's provider silently.
   if (provider.kind !== session.provider) throw conflict('AI 모드가 변경됐습니다. 새 상담 후보를 생성해주세요.');
-  const prior = repo.versionByRequest(input.sessionId, input.requestId);
+  const prior = (await repo.versionByRequest(input.sessionId, input.requestId));
   if (prior) return { version: prior, mock: prior.mock, provider: session.provider, summary: prior.summary };
   const key = input.sessionId + ':' + input.requestId;
   if (editing.has(key)) return editing.get(key)!;
@@ -73,7 +73,7 @@ export async function edit(designerId: string, input: EditRequest, execution?: I
       settings: { bang: input.bang, sideLength: input.sideLength, sideHair: input.sideHair, condition: input.condition },
       feedback: input.feedback, freeText: input.freeText,
     };
-    repo.saveVersion(input.sessionId, input.requestId, version);
+    await repo.saveVersion(input.sessionId, input.requestId, version);
     return { version, mock: out.mock, provider: provider.kind, summary: out.summary };
   })();
   editing.set(key, task); activeSessions.add(input.sessionId);

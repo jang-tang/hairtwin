@@ -22,7 +22,7 @@ export async function postRegister(req: Request, res: Response, next: NextFuncti
 export async function getMe(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const designerId = (req as Request & { designerId: string }).designerId;
-    res.json({ ok: true, data: { designer: service.me(designerId) } });
+    res.json({ ok: true, data: { designer: (await service.me(designerId)) } });
   } catch (e) {
     next(e);
   }

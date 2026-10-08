@@ -4,7 +4,7 @@
 프론트(`../src`)를 요구사항으로 역설계한 실제 서비스 구조다.
 
 ```text
-Frontend → Express API → Service → Repository → SQLite
+Frontend → Express API → Service → Repository → SQLite / PostgreSQL
                               ↘ Provider (Real / Mock)
 ```
 
@@ -61,7 +61,7 @@ npm run dev            # :8787 (SQLite 마이그레이션 + 데모 시드 자동
 ```text
 src/
   index.ts / app.ts / config.ts
-  db/        database.ts (node:sqlite + 버전형 마이그레이션) / seed.ts
+  db/        database.ts / SQLite·PostgreSQL 어댑터 / schema.ts / check.ts / seed.ts
   routes/    index.ts + schemas.ts (zod)
   controllers/ auth/customer/preset/record/ai
   services/    auth/customer/preset/record/ai
@@ -79,14 +79,14 @@ src/
   `prompt`에 `__fail__` 포함 시 502 시뮬레이션(에러 경로 테스트용).
   편집의 `freeText`에 `__fail__` 포함 시 편집 실패를 시뮬레이션합니다.
   `real` + `OPENAI_API_KEY`면 서버에서 OpenAI 호출 (키는 서버에만). 키가 없으면 503을 반환합니다.
-- **DB는 항상 실제 SQLite**를 사용한다 (mock 아님).
+- **DB는 실제 SQLite 또는 Supabase PostgreSQL**을 사용합니다. 설정과 마이그레이션은 아래 Supabase 안내를 참고하세요.
 
 사진 입력, 마스크 형식, 다각도 생성, 버전 저장과 테스트는 [AI 파이프라인 안내](../AI_PIPELINE.md)를 참고하세요.
 회귀 테스트: `npm.cmd test` (실제 API 호출 없음).
 
 ## 실패 원인 로그
 
-화면은 `/api/ai/jobs/generate`, `/api/ai/jobs/edit`로 작업을 시작하고 `/api/ai/jobs/:id`를 조회합니다. `/cancel`은 진행 중 요청을 중단하고 `/retry`는 성공한 이미지를 재사용합니다. SQLite 체크포인트·단일 프로세스 작업 관리·검토 저장은 [AI 파이프라인](../AI_PIPELINE.md)을 참고하세요.
+화면은 `/api/ai/jobs/generate`, `/api/ai/jobs/edit`로 작업을 시작하고 `/api/ai/jobs/:id`를 조회합니다. `/cancel`은 진행 중 요청을 중단하고 `/retry`는 성공한 이미지를 재사용합니다. DB 체크포인트·단일 프로세스 작업 관리·검토 저장은 [AI 파이프라인](../AI_PIPELINE.md)을 참고하세요.
 
 비동기 실패는 `ai.job.failed` 이벤트에 작업·이미지 단계·오류 ID를 기록합니다. HTTP 시작 요청이 성공했더라도 작업 상태가 `failed`일 수 있으므로 작업 조회 결과를 확인해야 합니다.
 
@@ -108,3 +108,7 @@ src/
 새 오류 로그에는 요청 본문, 사진, 고객 이름, 상담 문장, 인증 헤더, 키, URL 쿼리, 외부 오류 원문 및 전체 스택을 넣지 않습니다. 일반 접근 로그인 morgan 출력과는 별도이며, 로그 파일이나 외부 수집 서비스 연결은 추가하지 않았습니다. 연결이 서버에 도달하기 전에 실패하면 브라우저 로그만 남고 서버 오류 ID는 없습니다.
 
 검증: `test/error-log.test.ts`에서 운영 모드 로그, ID 연결, 정보 제외, 입력·요청 제한 오류를 확인하고 `test/image-provider.test.ts`에서 AI 실패 단계·원인 분류를 확인합니다.
+
+## Supabase PostgreSQL
+
+DB_PROVIDER=postgres와 서버 전용 DATABASE_URL, DATABASE_CA_PATH로 연결합니다. /api/health에서 실제 DB 연결 상태를 확인합니다. 원격 스키마·권한·기존 데이터·검증 방법은 [Supabase 연결 안내](../SUPABASE_SETUP.md)를 참고하세요. 로컬 SQLite는 계속 지원합니다.

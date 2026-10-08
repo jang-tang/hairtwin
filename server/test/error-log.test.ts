@@ -9,6 +9,7 @@ import { AppError } from '../src/utils/http.js';
 import { requestContext } from '../src/middleware/requestContext.js';
 import { validate } from '../src/middleware/validate.js';
 import { causeDiagnostic } from '../src/utils/errorLog.js';
+import { databaseError } from '../src/db/errors.js';
 import type { GenerateInput } from '../src/providers/image/types.js';
 
 process.env.NODE_ENV = 'production';
@@ -40,6 +41,8 @@ before(async () => {
     } catch (error) { next(error); }
   });
   app.post('/known', (_req, _res, next) => next(new AppError(409, 'CONFLICT', '다른 편집이 진행 중입니다.')));
+  app.post('/database-down', (_req, _res, next) => next(databaseError(Object.assign(new Error(secret), { code: '57P03' }))));
+  app.post('/database-conflict', (_req, _res, next) => next(databaseError(Object.assign(new Error(secret), { code: '23505', detail: secret }))));
   app.post('/limited', rateLimit({ windowMs: 60_000, max: 1,
     handler: (_req, _res, next) => next(new AppError(429, 'RATE_LIMITED', '요청이 너무 많습니다. 잠시 후 다시 시도해주세요.')),
   }), (_req, res) => res.json({ ok: true }));
@@ -102,4 +105,16 @@ test('validation, conflicts, malformed JSON, rate limits and missing routes also
   assert.equal((await fetch(base + '/limited', { method: 'POST' })).status, 200);
   const limited = await fail('/limited');
   assert.equal(limited.response.status, 429); assert.equal(limited.payload.error.code, 'RATE_LIMITED');
+});
+
+test('database failures retain SQLSTATE diagnostics and safe retry responses', async () => {
+  const down = await fail('/database-down');
+  assert.equal(down.response.status, 503); assert.equal(down.payload.error.code, 'DATABASE_UNAVAILABLE');
+  assert.equal(down.log.cause.code, '57P03');
+  const collision = await fail('/database-conflict');
+  assert.equal(collision.response.status, 409); assert.equal(collision.log.cause.code, '23505');
+  assert.equal(causeDiagnostic({ code: '23503' })?.code, '23503');
+  assert.equal(causeDiagnostic({ code: secret })?.code, undefined);
+  assert.equal(collision.payload.error.details, undefined);
+  assert.equal((databaseError(new Error('timeout exceeded when trying to connect')) as AppError).status, 503);
 });

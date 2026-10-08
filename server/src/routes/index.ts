@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import { getDb } from '../db/database.js';
+import { config } from '../config.js';
 import { requireAuth } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import * as c from '../controllers/auth.controller.js';
@@ -26,8 +28,11 @@ import {
 export function buildRouter(): Router {
   const r = Router();
 
-  r.get('/health', (_req, res) => {
-    res.json({ ok: true, data: { status: 'up', time: new Date().toISOString() } });
+  r.get('/health', async (_req, res, next) => {
+    try {
+      await getDb().prepare('SELECT 1 AS connected').get();
+      res.json({ ok: true, data: { status: 'up', time: new Date().toISOString(), database: { provider: config.dbProvider, status: 'connected' } } });
+    } catch (error) { next(error); }
   });
 
   // 인증 (mock 모드: 이름만으로 로그인, 사용자 없으면 DB에 자동 생성)

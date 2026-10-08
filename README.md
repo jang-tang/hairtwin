@@ -2,15 +2,17 @@
 
 미용사와 고객이 헤어스타일 후보를 함께 보고, 원하는 부분을 조정한 뒤 상담 결과를 기록하는 태블릿용 웹 앱입니다. 고객의 앞·옆·뒤 사진과 상담 조건을 바탕으로 후보를 비교하고, 이미지 버전별 변경 이력을 보관합니다.
 
-React 프론트엔드와 Express 백엔드로 구성되어 있으며 데이터는 SQLite에 저장합니다. **기본 개발 모드는 목업 로그인과 목업 AI입니다. API 키 없이 상담·생성·편집·저장 흐름을 확인할 수 있습니다.** 실제 AI 호출 코드는 구현되어 있지만, 키 연결과 실제 모델의 이미지 품질 검증은 아직 진행하지 않았습니다.
+React 프론트엔드와 Express 백엔드로 구성되어 있으며 데이터는 로컬 SQLite 또는 Supabase PostgreSQL에 저장합니다. **기본 개발 모드는 SQLite·목업 로그인·목업 AI입니다. API 키 없이 상담·생성·편집·저장 흐름을 확인할 수 있습니다.** Supabase 설정은 [연결 안내](SUPABASE_SETUP.md)를 참고하세요. 실제 AI 호출 코드는 구현되어 있지만, 키 연결과 실제 모델의 이미지 품질 검증은 아직 진행하지 않았습니다.
 
 ## 문서
 
 | 문서 | 내용 |
 | --- | --- |
 | [작업 정리](WORK_LOG.md) | 온보딩부터 AI 구현까지의 변경 사항, 검증 결과, 남은 작업 |
+| [현재 구현 요약](CHANGE_SUMMARY.md) | AI·DB·리팩토링 최종 구성과 검증·후속 작업 |
 | [AI 파이프라인](AI_PIPELINE.md) | 생성·편집 입력, 다각도 참조, 마스크, 버전 저장과 API 계약 |
-| [백엔드 안내](server/README.md) | 서버 설정, API 목록, SQLite 및 인증 동작 |
+| [백엔드 안내](server/README.md) | 서버 설정, API 목록, DB 및 인증 동작 |
+| [Supabase 연결](SUPABASE_SETUP.md) | 프로젝트·서버 DB 설정, 접근 권한, 마이그레이션·검증 |
 | [실패 원인 로그](server/README.md#실패-원인-로그) | 오류 ID로 브라우저·서버 실패 연결, AI 단계별 원인 확인 |
 
 ## 주요 기능
@@ -114,18 +116,21 @@ server/
   src/routes/            API 경로와 Zod 입력 검증
   src/controllers/       요청·응답 처리
   src/services/          인증·고객·프리셋·기록·AI 로직
-  src/repositories/      SQLite 조회와 저장
-  src/db/                스키마 마이그레이션과 데모 데이터
+  src/repositories/      SQLite / PostgreSQL 조회와 저장
+  src/db/                공통 DB 인터페이스, SQLite / PostgreSQL 어댑터, 검사·시드
+  src/serverLifecycle.ts HTTP·작업·DB 종료 처리
   src/providers/image/   목업·실제 공급자, 프롬프트, PNG 마스크
   src/middleware/        JWT 인증, 검증, 오류 처리
   test/                  API 및 이미지 공급자 회귀 테스트
   data/                  로컬 SQLite DB (Git 제외)
 AI_PIPELINE.md            AI 구현 상세
 WORK_LOG.md               작업 내역과 검증 결과
+SUPABASE_SETUP.md         서버 DB 설정과 마이그레이션 안내
+supabase/migrations/     PostgreSQL 버전형 스키마 변경
 vite.config.ts            개발 포트와 API 프록시
 ```
 
-기술 구성은 React 18, TypeScript, Vite 5, Tailwind CSS, Zustand, Express 4, Zod, JWT, Node SQLite, pngjs입니다. 두 패키지는 각각의 `package-lock.json`을 기준으로 설치합니다.
+기술 구성은 React 18, TypeScript, Vite 5, Tailwind CSS, Zustand, Express 4, Zod, JWT, Node SQLite, pg, pngjs입니다. 두 패키지는 각각의 `package-lock.json`을 기준으로 설치합니다.
 
 ### 데이터와 AI 흐름
 
@@ -134,7 +139,7 @@ flowchart LR
   UI[상담 화면] --> Store[Zustand 상태]
   Store --> Client[API 클라이언트]
   Client --> Server[Express 서비스]
-  Server --> DB[(SQLite)]
+  Server --> DB[(SQLite / PostgreSQL)]
   Server --> Provider[목업 또는 실제 이미지 공급자]
   Provider --> Server
   Store --> Draft[(IndexedDB)]
@@ -142,7 +147,7 @@ flowchart LR
 
 실제 공급자는 후보마다 정면을 먼저 생성하고, 그 결과를 해당 후보의 측면·후면 참조로 사용합니다. 편집은 저장된 기준 버전에 마스크를 적용하고, 편집 결과를 다른 두 방향의 참조로 사용합니다. 다각도 일관성은 이미지 참조와 프롬프트로 유도하며, 3D 재구성이나 자동 품질 검증을 수행하지 않습니다.
 
-생성·편집 화면은 실제 이미지 완료 수를 조회합니다. 진행 중 취소할 수 있고, 재시도는 성공한 이미지를 유지하며 실패·미생성 이미지만 이어 만듭니다. SQLite 체크포인트와 브라우저 작업 ID로 새로고침·서버 재시작 후 복구합니다. 단일 서버 프로세스 기준입니다.
+생성·편집 화면은 실제 이미지 완료 수를 조회합니다. 진행 중 취소할 수 있고, 재시도는 성공한 이미지를 유지하며 실패·미생성 이미지만 이어 만듭니다. DB 체크포인트와 브라우저 작업 ID로 새로고침·서버 재시작 후 복구합니다. 단일 서버 프로세스 기준입니다.
 
 이미지 비교 다음에는 디자이너가 시술 가능 여부·시술 방향·검토 사항·메모를 입력합니다. 조건부 시술·시술 어려움은 이유 메모가 필수이며 이미지 버전이 바뀌면 재검토합니다. 검토 내용은 상담 기록과 함께 저장됩니다.
 
@@ -159,7 +164,7 @@ npm.cmd --prefix server run build
 npm.cmd --prefix server test
 ```
 
-2026-10-05 기준 프론트·백엔드 빌드와 회귀 테스트 20개가 통과했습니다. 목업 브라우저에서는 사진 입력, 후보 생성, 편집 작업, V1·V2 비교, 조건부 시술의 메모 필수 처리, 검토 입력의 새로고침 복원, 상담 저장과 기록 상세 조회를 확인했습니다. 테스트에는 이미지별 진행률·취소·부분 재시도·체크포인트 복구가 포함됩니다. 검증 범위는 [작업 정리](WORK_LOG.md)를 참고하세요.
+2026-10-08 기준 프론트·백엔드 빌드와 회귀 테스트 28개가 통과했습니다. 실제 Supabase에서도 합성 사진을 이용한 후보 생성·부분 재시도·V2 편집·검토 저장·동시 요청·소유권·무결성 제약·재접속 복원을 확인했습니다. 앞선 목업 브라우저 검증과 상세 내역은 [작업 정리](WORK_LOG.md)를 참고하세요.
 
 | 명령 | 결과 / 용도 |
 | --- | --- |
@@ -168,6 +173,8 @@ npm.cmd --prefix server test
 | `npm.cmd --prefix server run build` | 백엔드 빌드, `server/dist/` 생성 |
 | `npm.cmd --prefix server run serve` | 빌드한 백엔드 실행 |
 | `npm.cmd --prefix server test` | 임시 SQLite와 가짜 HTTP 응답을 이용한 테스트 |
+| `npm.cmd --prefix server run db:check` | DB 연결·스키마·서버 계정·RLS 읽기 전용 점검 |
+| `npm.cmd --prefix server run test:postgres` | 합성 데이터를 저장하는 실제 PostgreSQL 검증; 목업 인증·AI 필수 |
 
 프론트 미리보기나 별도 호스팅에서는 `VITE_API_URL` 또는 서버의 `/api` 프록시를 별도로 설정해야 합니다. 별도 lint 스크립트와 프론트 자동 테스트 스크립트는 없습니다. Node SQLite의 ExperimentalWarning이 표시될 수 있습니다.
 
@@ -175,7 +182,7 @@ npm.cmd --prefix server test
 
 - 화면은 `src/pages/`, 공통 UI는 `src/components/`에서 수정합니다.
 - 생성·편집 계약을 바꾸면 공유 타입, Zod 스키마, API 클라이언트, 공급자와 관련 테스트를 함께 확인합니다.
-- DB 변경은 `server/src/db/database.ts`의 마이그레이션에 추가합니다. 기존 DB를 삭제해 적용하지 않습니다.
+- DB 인터페이스는 `server/src/db/database.ts`, 구현은 `sqliteAdapter.ts`·`postgresAdapter.ts`에서 수정합니다. SQLite 마이그레이션은 `server/src/db/sqlite.ts`, PostgreSQL은 `supabase/migrations/`에 추가하며 기존 DB를 삭제해 적용하지 않습니다.
 - `.env`, DB, 설치 캐시, 빌드 결과물은 Git에서 제외합니다. API 키는 프론트 환경변수에 넣지 않습니다.
 - 실제 모델의 이미지 품질, 인증 화면 확장, 운영용 이미지 저장소·보존 정책, 배포 설정은 남은 작업입니다.
 

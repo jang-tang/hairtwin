@@ -1,4 +1,4 @@
-import type { DatabaseSync } from 'node:sqlite';
+import type { Database } from '../db/database.js';
 import { getDb } from '../db/database.js';
 import { newId, nowIso, toJson, fromJson } from '../utils/ids.js';
 import { bumpCustomerStats } from './customer.repo.js';
@@ -78,7 +78,7 @@ export interface RecordInput {
   stylistReview?: StylistReview;
 }
 
-export function countRecords(designerId: string, opts: { search: string; customerId: string }, db: DatabaseSync = getDb()): number {
+export async function countRecords(designerId: string, opts: { search: string; customerId: string }, db: Database = getDb()): Promise<number> {
   const conds: string[] = [];
   const args: unknown[] = [designerId];
   if (opts.search) {
@@ -89,19 +89,19 @@ export function countRecords(designerId: string, opts: { search: string; custome
     conds.push('customer_id = ?');
     args.push(opts.customerId);
   }
-  const row = db
+  const row = (await db
     .prepare(
       `SELECT COUNT(*) AS c FROM consultation_records WHERE designer_id = ? AND deleted_at IS NULL ${conds.length ? 'AND ' + conds.join(' AND ') : ''}`
     )
-    .get(...(args as never[])) as { c: number };
+    .get(...(args as never[]))) as { c: number };
   return row.c;
 }
 
-export function listRecords(
+export async function listRecords(
   designerId: string,
   opts: { search: string; customerId: string; page: number; limit: number },
-  db: DatabaseSync = getDb()
-): RecordRow[] {
+  db: Database = getDb()
+): Promise<RecordRow[]> {
   const conds: string[] = [];
   const args: unknown[] = [designerId];
   if (opts.search) {
@@ -112,16 +112,16 @@ export function listRecords(
     conds.push('customer_id = ?');
     args.push(opts.customerId);
   }
-  return db
+  return (await db
     .prepare(
       `SELECT * FROM consultation_records WHERE designer_id = ? AND deleted_at IS NULL ${conds.length ? 'AND ' + conds.join(' AND ') : ''} ORDER BY created_at DESC LIMIT ? OFFSET ?`
     )
-    .all(...(args as never[]), opts.limit, (opts.page - 1) * opts.limit) as unknown as RecordRow[];
+    .all(...(args as never[]), opts.limit, (opts.page - 1) * opts.limit)) as unknown as RecordRow[];
 }
 
-export function findRecord(designerId: string, id: string, db: DatabaseSync = getDb()): RecordRow | null {
+export async function findRecord(designerId: string, id: string, db: Database = getDb()): Promise<RecordRow | null> {
   return (
-    (db.prepare('SELECT * FROM consultation_records WHERE id = ? AND designer_id = ? AND deleted_at IS NULL').get(id, designerId) as
+    ((await db.prepare('SELECT * FROM consultation_records WHERE id = ? AND designer_id = ? AND deleted_at IS NULL').get(id, designerId)) as
       | RecordRow
       | undefined) ?? null
   );
@@ -131,20 +131,20 @@ export function findRecord(designerId: string, id: string, db: DatabaseSync = ge
  * 상담 완료 트랜잭션: 기록 저장 + 고객 통계 갱신(있으면) 을 원자적으로 수행.
  * customerId가 없으면 customerName으로 기존 고객을 찾아 연결 시도.
  */
-export function createRecordTx(
+export async function createRecordTx(
   designerId: string,
   input: RecordInput,
-  db: DatabaseSync,
-  resolveCustomerId?: (designerId: string, name: string, db: DatabaseSync) => string | null
-): RecordRow {
+  db: Database,
+  resolveCustomerId?: (designerId: string, name: string, db: Database) => Promise<string | null>
+): Promise<RecordRow> {
   const now = nowIso();
   const id = newId('r');
   let customerId: string | null = input.customerId ?? null;
   if (!customerId && resolveCustomerId) {
-    customerId = resolveCustomerId(designerId, input.customerName, db);
+    customerId = await resolveCustomerId(designerId, input.customerName, db);
   }
   const date = input.date ?? now.slice(0, 10);
-  db.prepare(
+  await db.prepare(
     `INSERT INTO consultation_records (id, designer_id, customer_id, customer_name, date, style_name, views, intent, adjustments, condition_json, created_at, updated_at, ai_session_id, selected_version_id, stylist_review_json)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
@@ -164,11 +164,11 @@ export function createRecordTx(
     input.selectedVersionId ?? null,
     input.stylistReview ? toJson(input.stylistReview) : null
   );
-  if (customerId) bumpCustomerStats(designerId, customerId, date, db);
-  return db.prepare('SELECT * FROM consultation_records WHERE id = ?').get(id) as unknown as RecordRow;
+  if (customerId) await bumpCustomerStats(designerId, customerId, date, db);
+  return (await db.prepare('SELECT * FROM consultation_records WHERE id = ?').get(id)) as unknown as RecordRow;
 }
 
-export function softDeleteRecord(designerId: string, id: string, db: DatabaseSync = getDb()): boolean {
-  const r = db.prepare('UPDATE consultation_records SET deleted_at = ?, updated_at = ? WHERE id = ? AND designer_id = ? AND deleted_at IS NULL').run(nowIso(), nowIso(), id, designerId);
+export async function softDeleteRecord(designerId: string, id: string, db: Database = getDb()): Promise<boolean> {
+  const r = (await db.prepare('UPDATE consultation_records SET deleted_at = ?, updated_at = ? WHERE id = ? AND designer_id = ? AND deleted_at IS NULL').run(nowIso(), nowIso(), id, designerId));
   return Number((r as unknown as { changes: number }).changes ?? 0) > 0;
 }

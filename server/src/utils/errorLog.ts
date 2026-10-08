@@ -25,8 +25,9 @@ export function causeDiagnostic(error: unknown): ErrorDiagnostics['cause'] {
   const names = new Set(['Error', 'TypeError', 'RangeError', 'SyntaxError', 'TimeoutError', 'AbortError', 'ZodError']);
   const frame = typeof e?.stack === 'string' ? e.stack.split('\n').slice(1).find(line => /^\s+at /.test(line) && /[\\/]server[\\/]src[\\/]/.test(line)) : undefined;
   const location = frame?.match(/server[\\/]src[\\/][A-Za-z0-9_./\\-]+:\d+:\d+/)?.[0].replace(/\\/g, '/');
-  return { name: typeof e?.name === 'string' && names.has(e.name) ? e.name : 'Error',
-    code: diagnosticIdentifier(e?.cause?.code ?? e?.code), location };
+  const rawCode = e?.cause?.code ?? e?.code;
+  const code = typeof rawCode === 'string' && /^[0-9A-Z]{5}$/.test(rawCode) ? rawCode : diagnosticIdentifier(rawCode);
+  return { name: typeof e?.name === 'string' && names.has(e.name) ? e.name : 'Error', code, location };
 }
 
 export function logRequestFailure(req: Request, res: Response, status: number, code: string, message: string, diagnostics?: ErrorDiagnostics): void {

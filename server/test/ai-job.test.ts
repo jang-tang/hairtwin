@@ -8,6 +8,7 @@ import type { Server } from 'node:http';
 import type { AiJob, GenerateInput, ImageExecution } from '../src/providers/image/types.js';
 
 const directory = mkdtempSync(join(tmpdir(), 'hairtwin-job-test-'));
+process.env.DB_PROVIDER = 'sqlite';
 process.env.DB_PATH = join(directory, 'test.sqlite'); process.env.AI_PROVIDER = 'mock';
 process.env.AUTH_PROVIDER = 'mock'; process.env.SEED_DEMO = 'false';
 let server: Server, base: string, token: string, otherToken: string;
@@ -63,7 +64,7 @@ before(async () => {
 });
 after(async () => {
   await new Promise<void>((resolve, reject) => server.close(e => e ? reject(e) : resolve()));
-  const { closeDb } = await import('../src/db/database.js'); closeDb();
+  const { closeDb } = await import('../src/db/database.js'); (await closeDb());
   rmSync(directory, { recursive: true, force: true });
 });
 
@@ -78,7 +79,7 @@ test('job reports actual completed images, is owner scoped, and retries only the
   assert.ok(!JSON.stringify(failed).includes('private provider failure'));
   for (const action of ['', '/cancel', '/retry']) assert.equal((await request('/ai/jobs/' + id + action, action ? 'POST' : 'GET', undefined, otherToken)).status, 404);
   assert.equal((await request('/ai/jobs/generate', 'POST', input)).data.id, id);
-  const { closeDb } = await import('../src/db/database.js'); closeDb();
+  const { closeDb } = await import('../src/db/database.js'); (await closeDb());
   fail = '';
   assert.equal((await request('/ai/jobs/' + id + '/retry', 'POST')).status, 202);
   const completed = await until(id, job => job.status === 'completed');
@@ -99,16 +100,16 @@ test('cancellation aborts active work, retains successes, and resumes without du
   assert.equal(running.data.completed, 2); assert.equal(running.data.steps[2].status, 'running');
   const { getDb } = await import('../src/db/database.js');
   const { cancelJob, retryJob, getJob } = await import('../src/services/aiJob.service.js');
-  const owner = (getDb().prepare('SELECT id FROM designers WHERE name = ?').get('작업 디자이너') as { id: string }).id;
-  cancelJob(owner, started.data.id);
-  assert.throws(() => retryJob(owner, started.data.id), /중단하는 중/);
-  assert.equal(getJob(owner, started.data.id).attempt, 1);
+  const owner = ((await getDb().prepare('SELECT id FROM designers WHERE name = ?').get('작업 디자이너')) as { id: string }).id;
+  (await cancelJob(owner, started.data.id));
+  await assert.rejects(() => retryJob(owner, started.data.id), /중단하는 중/);
+  assert.equal((await getJob(owner, started.data.id)).attempt, 1);
   const cancelled = await request('/ai/jobs/' + started.data.id + '/cancel', 'POST');
   assert.equal(cancelled.data.status, 'cancelled'); assert.equal(cancelled.data.result, undefined);
   await new Promise(resolve => setTimeout(resolve, 10));
   assert.equal((await request('/ai/jobs/' + started.data.id)).data.status, 'cancelled');
   const { findByRequest } = await import('../src/repositories/ai.repo.js');
-  assert.equal(findByRequest(owner, 'cancel-job'), null);
+  assert.equal((await findByRequest(owner, 'cancel-job')), null);
   hold = ''; entered = undefined;
   await request('/ai/jobs/' + started.data.id + '/retry', 'POST');
   const completed = await until(started.data.id, job => job.status === 'completed');
@@ -143,17 +144,35 @@ test('an interrupted job reloads checkpoints and retries missing images', async 
   const { findJob, saveJob } = await import('../src/repositories/aiJob.repo.js');
   const { getJob, retryJob } = await import('../src/services/aiJob.service.js');
   const { getDb } = await import('../src/db/database.js');
-  const owner = (getDb().prepare('SELECT id FROM designers WHERE name = ?').get('작업 디자이너') as { id: string }).id;
+  const owner = ((await getDb().prepare('SELECT id FROM designers WHERE name = ?').get('작업 디자이너')) as { id: string }).id;
   fail = 'C:back';
   const started = await request('/ai/jobs/generate', 'POST', { ...input, requestId: 'interrupted-job' });
   await until(started.data.id, job => job.status === 'failed');
-  const checkpoint = findJob(owner, started.data.id)!;
+  const checkpoint = (await findJob(owner, started.data.id))!;
   checkpoint.status = 'running'; delete checkpoint.result; delete checkpoint.error;
-  delete checkpoint.images['C:back']; checkpoint.steps[8].status = 'running'; saveJob(checkpoint);
-  const restored = getJob(owner, checkpoint.id);
+  delete checkpoint.images['C:back']; checkpoint.steps[8].status = 'running'; (await saveJob(checkpoint));
+  const restored = (await getJob(owner, checkpoint.id));
   assert.equal(restored.status, 'failed'); assert.equal(restored.error?.code, 'JOB_INTERRUPTED');
   assert.equal(restored.completed, 8);
-  calls.clear(); fail = ''; retryJob(owner, checkpoint.id);
+  calls.clear(); fail = ''; (await retryJob(owner, checkpoint.id));
   await until(checkpoint.id, job => job.status === 'completed');
   assert.deepEqual([...calls.entries()], [['C:back', 1]]);
+});
+
+test('server shutdown aborts providers and commits resumable checkpoints before DB close', async () => {
+  calls.clear(); hold = 'A:back';
+  const gate = new Promise<void>(resolve => { entered = resolve; });
+  const started = await request('/ai/jobs/generate', 'POST', { ...input, requestId: 'shutdown-job' });
+  await gate;
+  const { shutdownJobs, retryJob } = await import('../src/services/aiJob.service.js');
+  const { getDb, closeDb } = await import('../src/db/database.js');
+  const { findJob } = await import('../src/repositories/aiJob.repo.js');
+  const owner = (await getDb().prepare('SELECT id FROM designers WHERE name = ?').get('작업 디자이너') as { id: string }).id;
+  await shutdownJobs(); await closeDb();
+  const restored = (await findJob(owner, started.data.id))!;
+  assert.equal(restored.status, 'cancelled'); assert.equal(restored.completed, 2);
+  assert.equal(restored.steps[2].status, 'pending');
+  assert.equal(Object.keys(restored.images).length, 2);
+  await assert.rejects(() => retryJob(owner, restored.id), (error: any) => error.code === 'SERVER_STOPPING');
+  assert.equal((await request('/ai/jobs/generate', 'POST', { ...input, requestId: 'after-shutdown' })).status, 503);
 });

@@ -1,4 +1,4 @@
-import type { DatabaseSync } from 'node:sqlite';
+import type { Database } from '../db/database.js';
 import { getDb } from '../db/database.js';
 import { newId, nowIso, toJson, fromJson } from '../utils/ids.js';
 
@@ -69,7 +69,7 @@ export interface PresetInput {
   refImages?: string[];
 }
 
-export function countPresets(designerId: string, search: string, category: string, db: DatabaseSync = getDb()): number {
+export async function countPresets(designerId: string, search: string, category: string, db: Database = getDb()): Promise<number> {
   const conds: string[] = [];
   const args: unknown[] = [designerId];
   if (search) {
@@ -80,17 +80,17 @@ export function countPresets(designerId: string, search: string, category: strin
     conds.push('category = ?');
     args.push(category);
   }
-  const row = db
+  const row = (await db
     .prepare(`SELECT COUNT(*) AS c FROM presets WHERE designer_id = ? AND deleted_at IS NULL ${conds.length ? 'AND ' + conds.join(' AND ') : ''}`)
-    .get(...(args as never[])) as { c: number };
+    .get(...(args as never[]))) as { c: number };
   return row.c;
 }
 
-export function listPresets(
+export async function listPresets(
   designerId: string,
   opts: { search: string; category: string; page: number; limit: number },
-  db: DatabaseSync = getDb()
-): PresetRow[] {
+  db: Database = getDb()
+): Promise<PresetRow[]> {
   const conds: string[] = [];
   const args: unknown[] = [designerId];
   if (opts.search) {
@@ -101,25 +101,25 @@ export function listPresets(
     conds.push('category = ?');
     args.push(opts.category);
   }
-  return db
+  return (await db
     .prepare(
       `SELECT * FROM presets WHERE designer_id = ? AND deleted_at IS NULL ${conds.length ? 'AND ' + conds.join(' AND ') : ''} ORDER BY updated_at DESC LIMIT ? OFFSET ?`
     )
-    .all(...(args as never[]), opts.limit, (opts.page - 1) * opts.limit) as unknown as PresetRow[];
+    .all(...(args as never[]), opts.limit, (opts.page - 1) * opts.limit)) as unknown as PresetRow[];
 }
 
-export function findPreset(designerId: string, id: string, db: DatabaseSync = getDb()): PresetRow | null {
+export async function findPreset(designerId: string, id: string, db: Database = getDb()): Promise<PresetRow | null> {
   return (
-    (db.prepare('SELECT * FROM presets WHERE id = ? AND designer_id = ? AND deleted_at IS NULL').get(id, designerId) as
+    ((await db.prepare('SELECT * FROM presets WHERE id = ? AND designer_id = ? AND deleted_at IS NULL').get(id, designerId)) as
       | PresetRow
       | undefined) ?? null
   );
 }
 
-export function createPreset(designerId: string, input: PresetInput, db: DatabaseSync = getDb()): PresetRow {
+export async function createPreset(designerId: string, input: PresetInput, db: Database = getDb()): Promise<PresetRow> {
   const now = nowIso();
   const id = newId('sp');
-  db.prepare(
+  await db.prepare(
     `INSERT INTO presets (id, designer_id, name, description, category, length, bang, perm, color, memo, ref_images, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
@@ -137,13 +137,13 @@ export function createPreset(designerId: string, input: PresetInput, db: Databas
     now,
     now
   );
-  return findPreset(designerId, id, db)!;
+  return (await findPreset(designerId, id, db))!;
 }
 
-export function updatePreset(designerId: string, id: string, input: Partial<PresetInput>, db: DatabaseSync = getDb()): PresetRow | null {
-  const cur = findPreset(designerId, id, db);
+export async function updatePreset(designerId: string, id: string, input: Partial<PresetInput>, db: Database = getDb()): Promise<PresetRow | null> {
+  const cur = (await findPreset(designerId, id, db));
   if (!cur) return null;
-  db.prepare(
+  await db.prepare(
     `UPDATE presets SET name = ?, description = ?, category = ?, length = ?, bang = ?, perm = ?, color = ?, memo = ?, ref_images = ?, updated_at = ? WHERE id = ?`
   ).run(
     input.name ?? cur.name,
@@ -158,10 +158,10 @@ export function updatePreset(designerId: string, id: string, input: Partial<Pres
     nowIso(),
     id
   );
-  return findPreset(designerId, id, db);
+  return await findPreset(designerId, id, db);
 }
 
-export function softDeletePreset(designerId: string, id: string, db: DatabaseSync = getDb()): boolean {
-  const r = db.prepare('UPDATE presets SET deleted_at = ?, updated_at = ? WHERE id = ? AND designer_id = ? AND deleted_at IS NULL').run(nowIso(), nowIso(), id, designerId);
+export async function softDeletePreset(designerId: string, id: string, db: Database = getDb()): Promise<boolean> {
+  const r = (await db.prepare('UPDATE presets SET deleted_at = ?, updated_at = ? WHERE id = ? AND designer_id = ? AND deleted_at IS NULL').run(nowIso(), nowIso(), id, designerId));
   return Number((r as unknown as { changes: number }).changes ?? 0) > 0;
 }
