@@ -1,12 +1,15 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AppShell, PrimaryButton, SecondaryButton, PageHeader, Chip, SliderControl, NoConsult, Guard, MockBadge } from '../components/ui';
 import { DraggableRegion } from '../components/viewers';
-import { useConsult, transitionTo, setRegionType, appendEditedVersion } from '../stores/consultationStore';
+import { useConsult, transitionTo, setRegionType, appendEditedVersion, validReview, routeMap } from '../stores/consultationStore';
 import { useDash, useUi } from '../stores/baseStores';
 import { REGION_LABEL, QUICK_OPTIONS, type RegionType } from '../types';
 import { bangLabel, sideLabel, BANG_QUICK, SIDE_QUICK, FRINGE_LINE_COLOR, SIDE_LINE_COLOR } from '../data';
-import { requestEdit } from '../api/aiClient';
+import { useAiJob } from '../hooks/useAiJob';
+import { AiJobProgress } from '../components/AiJobProgress';
+import type { EditResult, StylistReview } from '../../server/src/providers/image/types';
+import { Navigate } from 'react-router-dom';
 
 // 영역 선택 → 보여줄 목업 방향 (앞머리=앞, 옆머리=옆, 뒷머리=뒤)
 const REGION_VIEW: Record<RegionType, 'front' | 'side' | 'back'> = {
@@ -55,28 +58,34 @@ export function FeedbackPage() {
   const { candidates, selectedCandidate, region, set, bang, sideLength, quickEdits, freeText, versions, chosenVersion, sessionId, condition, sideHair, aiMock } = useConsult();
   const toast = useUi((s) => s.showToast);
   const cd = candidates.find((c) => c.id === selectedCandidate) ?? candidates[0];
-  const [busy, setBusy] = useState(false);
+  const work = useAiJob('edit');
+  const handled = useRef('');
   const base = versions.find(v => v.id === chosenVersion);
   const applying = useRef(false);
+  useEffect(() => {
+    if (work.job?.status !== 'completed' || !work.job.result || handled.current === work.job.id) return;
+    handled.current = work.job.id;
+    const result = work.job.result as EditResult;
+    work.clear(); appendEditedVersion(result.version);
+    toast(result.mock ? '목업 편집 결과를 저장했어요.' : '편집 결과를 새 버전으로 저장했어요.');
+    transitionTo('interpretation', nav);
+  }, [work.job, nav, toast]);
   if (!cd || !base || !sessionId) return <AppShell><NoConsult /></AppShell>;
   const apply = async () => {
     if (applying.current) return;
-    applying.current = true; setBusy(true);
+    applying.current = true;
     try {
-      const r = await requestEdit({
-        requestId: crypto.randomUUID(), sessionId, baseVersionId: base.id,
+      const requestId = useConsult.getState().editRequestId || crypto.randomUUID();
+      useConsult.getState().set({ editRequestId: requestId });
+      await work.start({
+        requestId, sessionId, baseVersionId: base.id,
         view: REGION_VIEW[region?.type ?? 'all'], region, bang, sideLength, condition, sideHair,
         feedback: quickEdits, freeText,
       });
-      if (useConsult.getState().sessionId !== sessionId) return;
-      appendEditedVersion(r.version);
-      toast(r.mock ? '목업 편집 결과를 저장했어요.' : '편집 결과를 새 버전으로 저장했어요.');
-      transitionTo('interpretation', nav);
     } catch (e) {
       toast(e instanceof Error ? e.message : '적용에 실패했어요.');
     } finally {
       applying.current = false;
-      setBusy(false);
     }
   };
   // 영역에 해당하는 목업 한 장만 표시 (앞머리→앞, 옆머리→옆, 뒷머리→뒤)
@@ -93,7 +102,10 @@ export function FeedbackPage() {
     <AppShell>
       <PageHeader title="여기서 조금 바꾸고 싶은 부분이 있나요?" sub={`${base.label}에서 편집해요. 사각형 안의 머리만 변경하고 다른 방향도 함께 맞춰요.`} step={8} total={10} />
       {aiMock && <div className="mb-3"><MockBadge /></div>}
-      <div className="grid lg:grid-cols-[1.2fr_.8fr] gap-4">
+      {work.id && <div className="mb-4"><AiJobProgress job={work.job} error={work.error} sending={work.sending} onCancel={work.cancel} onRetry={work.retry} />
+        {(work.missing || work.job && ['failed', 'cancelled'].includes(work.job.status)) && <div className="mt-3"><SecondaryButton disabled={work.sending} onClick={work.clear}>편집 조건 바꾸기</SecondaryButton></div>}
+      </div>}
+      <fieldset disabled={work.busy || !!work.id} className="grid lg:grid-cols-[1.2fr_.8fr] gap-4 disabled:opacity-60">
         <div>
           {region && (
             <DraggableRegion
@@ -158,11 +170,11 @@ export function FeedbackPage() {
             <input value={freeText} onChange={(e) => set({ freeText: e.target.value })}
               maxLength={500} placeholder="예: 앞머리는 눈썹 아래 2cm로 가볍게" className="w-full min-h-[52px] border border-line rounded-2xl px-4" />
           </div>
-          <PrimaryButton disabled={busy} onClick={apply}>{busy ? '적용 중…' : '이대로 적용'}</PrimaryButton>
+          <PrimaryButton disabled={work.busy || !!work.id} onClick={apply}>{work.busy ? '적용 중…' : '이대로 적용'}</PrimaryButton>
           <SecondaryButton onClick={() => transitionTo('comparison', nav)}>바꾸고 싶은 곳 없어요 · 그대로 진행</SecondaryButton>
           <SecondaryButton onClick={() => transitionTo('candidates', nav)}>다른 후보 보기</SecondaryButton>
         </div>
-      </div>
+      </fieldset>
     </AppShell>
   );
 }
@@ -215,12 +227,38 @@ export function ComparisonPage() {
         ))}
       </div>
       <div className="grid gap-2">
-        <PrimaryButton onClick={() => transitionTo('finalize', nav)}>이대로 진행할게요 ({list.find(v => v.id === chosenVersion)?.label ?? '버전'} 선택됨)</PrimaryButton>
+        <PrimaryButton onClick={() => { useConsult.getState().chooseVersion(chosenVersion); transitionTo('stylistReview', nav); }}>디자이너 검토하기 ({list.find(v => v.id === chosenVersion)?.label ?? '버전'} 선택됨)</PrimaryButton>
         <SecondaryButton onClick={() => transitionTo('feedback', nav)}>선택한 버전에서 더 수정하기</SecondaryButton>
         <SecondaryButton onClick={() => transitionTo('candidates', nav)}>다른 후보 보기</SecondaryButton>
       </div>
     </AppShell>
   );
+}
+
+export function StylistReviewPage() {
+  const nav = useNavigate();
+  const { versions, chosenVersion, stylist, set } = useConsult();
+  const version = versions.find(v => v.id === chosenVersion);
+  if (!version) return <AppShell><NoConsult /></AppShell>;
+  const update = (patch: Partial<typeof stylist>) => set({ stylist: { ...stylist, ...patch, versionId: '' } });
+  const ready = !!stylist.possible && (stylist.possible === '가능' || !!stylist.memo.trim());
+  return <AppShell>
+    <PageHeader title="디자이너 검토" sub={`후보 ${version.candidateId} · ${version.label}을 실제 모발 상태와 함께 검토해주세요.`} />
+    <div className="grid grid-cols-3 gap-2 mb-5">{(['front', 'side', 'back'] as const).map(view => <img key={view} src={version.views[view]} alt={VIEW_KO[view]} className="rounded-2xl aspect-square object-contain" />)}</div>
+    <div className="grid gap-5 border border-line rounded-3xl p-5 mb-5">
+      <fieldset><legend className="font-bold mb-2">시술 가능 여부 · 필수</legend><div role="radiogroup" aria-label="시술 가능 여부" className="flex flex-wrap gap-2">
+        {(['가능', '조건부 가능', '어려움'] as const).map(value => <button key={value} role="radio" aria-checked={stylist.possible === value} onClick={() => update({ possible: value })} className={`min-h-[48px] px-5 rounded-xl border ${stylist.possible === value ? 'bg-primarySoft border-primary text-primary' : 'border-line'}`}>{value}</button>)}
+      </div></fieldset>
+      <label className="grid gap-2 font-bold">컬 강도<select aria-label="컬 강도" value={stylist.curl} onChange={e => update({ curl: e.target.value as StylistReview['curl'] })} className="min-h-[48px] border border-line rounded-xl px-3">{['약', '중', '강'].map(value => <option key={value}>{value}</option>)}</select></label>
+      <label className="grid gap-2 font-bold">옆머리 시술 방향<select aria-label="옆머리 시술 방향" value={stylist.sideControl} onChange={e => update({ sideControl: e.target.value as StylistReview['sideControl'] })} className="min-h-[48px] border border-line rounded-xl px-3">{['자연스럽게', '다운', '볼륨 유지'].map(value => <option key={value}>{value}</option>)}</select></label>
+      <fieldset><legend className="font-bold mb-2">검토 사항</legend><div className="flex flex-wrap gap-2">{['손상 모발 주의', '길이 유지', '단계적 시술', '홈케어 안내'].map(note => <Chip key={note} active={stylist.notes.includes(note)} onClick={() => update({ notes: stylist.notes.includes(note) ? stylist.notes.filter(n => n !== note) : [...stylist.notes, note] })}>{note}</Chip>)}</div></fieldset>
+      <label className="grid gap-2 font-bold">디자이너 메모 {stylist.possible && stylist.possible !== '가능' ? '· 필수' : '· 선택'}<textarea aria-label="디자이너 메모" value={stylist.memo} maxLength={1000} rows={4} onChange={e => update({ memo: e.target.value })} placeholder="시술 조건, 어려운 이유, 대안 또는 고객에게 안내한 내용을 남겨주세요." className="border border-line rounded-xl p-3 font-normal" /></label>
+      {stylist.possible && stylist.possible !== '가능' && !stylist.memo.trim() && <p className="text-error text-sm">시술 조건 또는 어려운 이유를 메모에 입력해주세요.</p>}
+    </div>
+    <div className="grid gap-2"><PrimaryButton disabled={!ready} onClick={() => {
+      set({ stylist: { ...stylist, versionId: version.id } }); transitionTo('finalize', nav);
+    }}>검토 완료하고 최종 확인</PrimaryButton><SecondaryButton onClick={() => transitionTo('comparison', nav)}>이미지 다시 비교</SecondaryButton></div>
+  </AppShell>;
 }
 
 export function FinalizePage() {
@@ -229,6 +267,7 @@ export function FinalizePage() {
   const v = versions.find((x) => x.id === chosenVersion) ?? versions[0];
   const cd = candidates.find((c) => c.id === selectedCandidate);
   if (!v) return <AppShell><NoConsult /></AppShell>;
+  if (!validReview()) return <Navigate to={routeMap.stylistReview} replace />;
   return (
     <AppShell>
       <PageHeader title="오늘 결정한 스타일" sub="고객과 화면을 함께 보며 확인해주세요." step={10} total={10} />
@@ -252,7 +291,9 @@ export function FinalizePage() {
             className={`flex-1 min-h-[44px] rounded-xl border ${viewTab === t ? 'bg-primarySoft border-primary text-primary font-bold' : 'border-line'}`}>{['앞', '옆', '뒤'][i]}</button>
         ))}
       </div>
-      <PrimaryButton onClick={() => transitionTo('report', nav)}>이 방향으로 상담 완료</PrimaryButton>
+      <ReviewSummary review={stylist as StylistReview} />
+      <div className="grid gap-2"><SecondaryButton onClick={() => transitionTo('stylistReview', nav)}>검토 내용 수정</SecondaryButton>
+      <PrimaryButton onClick={() => transitionTo('report', nav)}>이 방향으로 상담 완료</PrimaryButton></div>
     </AppShell>
   );
 }
@@ -266,6 +307,7 @@ export function ReportPage() {
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   if (!v) return <AppShell><NoConsult /></AppShell>;
+  if (!validReview()) return <Navigate to={routeMap.stylistReview} replace />;
   const done = async () => {
     if (savingRef.current) return;
     savingRef.current = true; setSaving(true);
@@ -276,6 +318,7 @@ export function ReportPage() {
       adjustments: [`앞머리 ${bangLabel(st.bang)}`, `옆머리 ${sideLabel(st.sideLength ?? 50)}`, st.sideHair, ...st.quickEdits, ...st.stylist.notes],
       condition: v.settings.condition,
       sessionId: st.sessionId ?? undefined, selectedVersionId: v.id,
+      stylistReview: st.stylist as StylistReview,
     };
     try {
       if (!customers.some((c) => c.name === st.customerName)) {
@@ -307,7 +350,17 @@ export function ReportPage() {
           </div>
         </div>
       </div>
+      <ReviewSummary review={st.stylist as StylistReview} />
       <PrimaryButton disabled={saving} onClick={done}>{saving ? '상담 저장 중…' : '상담 저장하고 대시보드로'}</PrimaryButton>
     </AppShell>
   );
+}
+
+export function ReviewSummary({ review }: { review: StylistReview }) {
+  return <section aria-label="디자이너 검토 내용" className="border border-line rounded-3xl p-5 mb-4">
+    <p className="font-bold mb-2">디자이너 검토 · {review.possible}</p>
+    <p className="text-secondary">컬 강도 {review.curl} · 옆머리 {review.sideControl}</p>
+    {review.notes.length > 0 && <p className="text-secondary mt-1">{review.notes.join(' · ')}</p>}
+    <p className="mt-2 whitespace-pre-wrap break-words">{review.memo || '메모 없음'}</p>
+  </section>;
 }

@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { getDb } from '../db/database.js';
 import { newId, nowIso, toJson, fromJson } from '../utils/ids.js';
 import { bumpCustomerStats } from './customer.repo.js';
+import type { StylistReview } from '../providers/image/types.js';
 
 export interface HairCondition {
   damage: string;
@@ -25,6 +26,7 @@ export interface RecordRow {
   condition_json: string | null;
   ai_session_id: string | null;
   selected_version_id: string | null;
+  stylist_review_json: string | null;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
@@ -42,6 +44,7 @@ export interface PublicRecord {
   condition: HairCondition | null;
   sessionId?: string;
   selectedVersionId?: string;
+  stylistReview?: StylistReview;
 }
 
 export function toPublicRecord(r: RecordRow): PublicRecord {
@@ -57,6 +60,7 @@ export function toPublicRecord(r: RecordRow): PublicRecord {
     condition: fromJson<HairCondition | null>(r.condition_json, null),
     ...(r.ai_session_id ? { sessionId: r.ai_session_id } : {}),
     ...(r.selected_version_id ? { selectedVersionId: r.selected_version_id } : {}),
+    ...(r.stylist_review_json ? { stylistReview: fromJson<StylistReview>(r.stylist_review_json, {} as StylistReview) } : {}),
   };
 }
 
@@ -71,6 +75,7 @@ export interface RecordInput {
   condition?: HairCondition | null;
   sessionId?: string;
   selectedVersionId?: string;
+  stylistReview?: StylistReview;
 }
 
 export function countRecords(designerId: string, opts: { search: string; customerId: string }, db: DatabaseSync = getDb()): number {
@@ -140,8 +145,8 @@ export function createRecordTx(
   }
   const date = input.date ?? now.slice(0, 10);
   db.prepare(
-    `INSERT INTO consultation_records (id, designer_id, customer_id, customer_name, date, style_name, views, intent, adjustments, condition_json, created_at, updated_at, ai_session_id, selected_version_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO consultation_records (id, designer_id, customer_id, customer_name, date, style_name, views, intent, adjustments, condition_json, created_at, updated_at, ai_session_id, selected_version_id, stylist_review_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id,
     designerId,
@@ -156,7 +161,8 @@ export function createRecordTx(
     now,
     now,
     input.sessionId ?? null,
-    input.selectedVersionId ?? null
+    input.selectedVersionId ?? null,
+    input.stylistReview ? toJson(input.stylistReview) : null
   );
   if (customerId) bumpCustomerStats(designerId, customerId, date, db);
   return db.prepare('SELECT * FROM consultation_records WHERE id = ?').get(id) as unknown as RecordRow;

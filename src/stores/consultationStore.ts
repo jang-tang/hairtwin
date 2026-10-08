@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type { Candidate, HairCondition, Region, RegionType, SideHair } from '../types';
-import type { ImageVersion, GenerationResult } from '../../server/src/providers/image/types';
+import type { ImageVersion, GenerationResult, StylistReview } from '../../server/src/providers/image/types';
 import { indexedStorage } from '../storage/indexedStorage';
 
 export type Step = 'start' | 'intent' | 'photo' | 'style' | 'condition' | 'generation' | 'candidates' | 'feedback' | 'interpretation' | 'comparison' | 'stylistReview' | 'finalize' | 'report';
@@ -22,7 +22,8 @@ interface ConsultationState {
   viewTab: 'front' | 'side' | 'back'; region: Region | null; quickEdits: string[]; freeText: string;
   versions: ImageVersion[]; chosenVersion: string; sessionId: string | null;
   generationRequestId: string; aiMock: boolean; summary: string;
-  stylist: { curl: string; sideControl: string; possible: string; notes: string[]; memo: string };
+  generationJobId: string; editJobId: string; editRequestId: string;
+  stylist: Omit<StylistReview, 'versionId' | 'possible'> & { versionId: string; possible: StylistReview['possible'] | '' };
   set: (p: Partial<ConsultationState>) => void; reset: () => void;
   acceptGeneration: (result: GenerationResult) => void;
   selectCandidate: (id: string) => void; chooseVersion: (id: string) => void;
@@ -37,14 +38,16 @@ function initial() {
     region: { id: 'r1', type: 'fringe', x: .3, y: .22, w: .4, h: .18, label: '앞머리' } as Region,
     quickEdits: [] as string[], freeText: '', versions: [] as ImageVersion[], chosenVersion: '',
     sessionId: null, generationRequestId: '', aiMock: true, summary: '',
-    stylist: { curl: '중', sideControl: '다운', possible: '가능', notes: [] as string[], memo: '' },
+    generationJobId: '', editJobId: '', editRequestId: '',
+    stylist: { versionId: '', curl: '중' as const, sideControl: '자연스럽게' as const, possible: '' as const, notes: [] as string[], memo: '' },
   };
 }
 export const useConsult = create<ConsultationState>()(persist((set, get) => ({
   ...initial(), hydrated: false,
   set: p => set(p), reset: () => set(initial()),
   acceptGeneration: result => set({ sessionId: result.sessionId, candidates: result.candidates, versions: result.versions,
-    aiMock: result.mock, selectedCandidate: null, chosenVersion: '', summary: '' }),
+    aiMock: result.mock, selectedCandidate: null, chosenVersion: '', summary: '', generationJobId: '', editJobId: '',
+    stylist: initial().stylist }),
   selectCandidate: id => {
     const version = [...get().versions].reverse().find(v => v.candidateId === id);
     if (version) get().chooseVersion(version.id);
@@ -53,6 +56,7 @@ export const useConsult = create<ConsultationState>()(persist((set, get) => ({
     const v = get().versions.find(v => v.id === id);
     if (!v) return;
     set({ chosenVersion: v.id, selectedCandidate: v.candidateId, aiMock: v.mock, summary: v.summary,
+      ...(get().chosenVersion !== v.id ? { stylist: initial().stylist, editJobId: '', editRequestId: '' } : {}),
       bang: v.settings.bang, sideLength: v.settings.sideLength, sideHair: v.settings.sideHair as SideHair,
       condition: v.settings.condition, quickEdits: v.feedback, freeText: v.freeText });
   },
@@ -61,6 +65,11 @@ export const useConsult = create<ConsultationState>()(persist((set, get) => ({
   partialize: ({ hydrated: _, set: _set, reset: _reset, acceptGeneration: _accept, selectCandidate: _select, chooseVersion: _choose, ...state }) => state,
   onRehydrateStorage: () => () => { useConsult.getState().set({ hydrated: true }); },
 }));
+export function validReview() {
+  const s = useConsult.getState();
+  return s.stylist.versionId === s.chosenVersion && !!s.stylist.possible &&
+    (s.stylist.possible === '가능' || !!s.stylist.memo.trim());
+}
 export function transitionTo(step: Step, navigate: (to: string) => void) {
   useConsult.getState().set({ step }); navigate(routeMap[step]);
 }

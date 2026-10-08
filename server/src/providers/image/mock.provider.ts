@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto';
 import { PNG } from 'pngjs';
 import { DIRECTIONS, editSummary } from './prompts.js';
 import { createMask, pngUrl, readPng } from './png.js';
-import { VIEW_KEYS, type EditInput, type GenerateInput, type ImageProvider, type TriView } from './types.js';
+import { VIEW_KEYS, type EditInput, type GenerateInput, type ImageProvider, type TriView, type ImageExecution, type GeneratedCandidate } from './types.js';
+import { runImage, collectImages } from './execution.js';
 
 function mockImage(source: string, seed: string, mask?: Buffer): string {
   const image = readPng(source), hash = createHash('sha256').update(seed).digest();
@@ -20,21 +21,29 @@ function mockImage(source: string, seed: string, mask?: Buffer): string {
 // Offline PNGs exercise the same photo, mask and returned-image contract.
 export class MockImageProvider implements ImageProvider {
   readonly kind = 'mock' as const;
-  async generate(input: GenerateInput) {
-    if (input.prompt?.includes('__fail__')) throw Object.assign(new Error('목업 생성 오류'), { status: 502 });
+  async generate(input: GenerateInput, execution?: ImageExecution) {
     const context = JSON.stringify({ ...input, requestId: undefined });
-    const candidates = DIRECTIONS.map(d => {
+    const candidates: GeneratedCandidate[] = [];
+    await collectImages(execution, DIRECTIONS.map(d => async () => {
       const views = {} as TriView;
-      for (const view of VIEW_KEYS) views[view] = mockImage(input.photos[view], context + d.id);
-      return { id: d.id, name: d.name, desc: d.desc, views };
-    });
+      await collectImages(execution, VIEW_KEYS.map(view => async () => {
+        views[view] = await runImage(execution, d.id + ':' + view, async () => {
+          if (input.prompt?.includes('__fail__')) throw Object.assign(new Error('목업 생성 오류'), { status: 502 });
+          return mockImage(input.photos[view], context + d.id);
+        });
+      }));
+      candidates.push({ id: d.id, name: d.name, desc: d.desc, views });
+    }));
     return { candidates, mock: true };
   }
-  async edit(input: EditInput) {
-    if (input.freeText.includes('__fail__')) throw Object.assign(new Error('목업 편집 오류'), { status: 502 });
+  async edit(input: EditInput, execution?: ImageExecution) {
     const views = {} as TriView, seed = editSummary(input);
-    for (const view of VIEW_KEYS) views[view] = mockImage(input.views[view], seed,
-      view === input.view ? createMask(input.views[view], input.region) : undefined);
+    await collectImages(execution, VIEW_KEYS.map(view => async () => {
+      views[view] = await runImage(execution, input.candidate.id + ':' + view, async () => {
+        if (input.freeText.includes('__fail__')) throw Object.assign(new Error('목업 편집 오류'), { status: 502 });
+        return mockImage(input.views[view], seed, view === input.view ? createMask(input.views[view], input.region) : undefined);
+      });
+    }));
     return { views, mock: true, summary: editSummary(input) };
   }
 }

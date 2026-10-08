@@ -16,6 +16,7 @@ export interface ConsultationRecord {
   id: string; customerName: string; date: string; styleName: string;
   views: TriView; intent: string; adjustments: string[]; condition: HairCondition | null;
   sessionId?: string; selectedVersionId?: string;
+  stylistReview?: import('../server/src/providers/image/types').StylistReview;
 }
 export const REGION_LABEL: Record<RegionType, string> = {
   fringe: '앞머리', side: '옆머리', crown: '정수리', back: '뒷머리', all: '전체'

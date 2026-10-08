@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { PNG } from 'pngjs';
 import { RealImageProvider } from '../src/providers/image/real.provider.js';
 import { createMask, pngUrl, readPng } from '../src/providers/image/png.js';
-import type { GenerateInput, EditInput } from '../src/providers/image/types.js';
+import type { GenerateInput, EditInput, ImageExecution } from '../src/providers/image/types.js';
 
 function photo(color: number) {
   const p = new PNG({width:32,height:32}); p.data.fill(color);
@@ -28,6 +28,54 @@ function transport() {
   };
   return { forms, provider: new RealImageProvider(fake,'test-only') };
 }
+
+test('job generation continues independent views and reuses all successful anchors and views on retry', async () => {
+  const forms: FormData[] = [], images = new Map<string, string>();
+  const provider = new RealImageProvider(async (_url, init) => {
+    forms.push(init!.body as FormData);
+    return forms.length === 2 ? new Response('{}', { status: 503 }) :
+      new Response(JSON.stringify({ data: [{ b64_json: photo(100 + forms.length).split(',')[1] }] }), { status: 200 });
+  }, 'test-only');
+  const execution: ImageExecution = { signal: new AbortController().signal, image: async (id, work) => {
+    if (images.has(id)) return images.get(id)!;
+    const result = await work(); images.set(id, result); return result;
+  } };
+  await assert.rejects(() => provider.generate(input, execution), /503/);
+  assert.equal(forms.length, 9); assert.equal(images.size, 8);
+  const anchors = ['A', 'B', 'C'].map(id => images.get(id + ':front'));
+  const result = await provider.generate(input, execution);
+  assert.equal(forms.length, 10); assert.equal(images.size, 9);
+  assert.deepEqual(result.candidates.map(c => c.views.front), anchors);
+  assert.equal(await blobUrl(forms[9].getAll('image[]')[1]), anchors[0]);
+});
+
+test('a failed front anchor defers only its dependent views while other candidates finish', async () => {
+  let calls = 0;
+  const images = new Map<string, string>();
+  const provider = new RealImageProvider(async () => ++calls === 1 ? new Response('{}', { status: 503 }) :
+    new Response(JSON.stringify({ data: [{ b64_json: photo(100 + calls).split(',')[1] }] }), { status: 200 }), 'test-only');
+  const execution: ImageExecution = { signal: new AbortController().signal, image: async (id, work) => {
+    if (images.has(id)) return images.get(id)!;
+    const result = await work(); images.set(id, result); return result;
+  } };
+  await assert.rejects(() => provider.generate(input, execution), /503/);
+  assert.equal(calls, 7); assert.equal(images.size, 6);
+  await provider.generate(input, execution);
+  assert.equal(calls, 10); assert.equal(images.size, 9);
+});
+
+test('job cancellation aborts the real HTTP request and prevents subsequent image calls', async () => {
+  const controller = new AbortController(); let calls = 0, signal: AbortSignal | undefined;
+  const provider = new RealImageProvider(async (_url, init) => {
+    calls++; signal = init?.signal as AbortSignal;
+    return new Promise<Response>((_, reject) => signal!.addEventListener('abort', () => reject(signal!.reason), { once: true }));
+  }, 'test-only');
+  const execution: ImageExecution = { signal: controller.signal, image: (_id, work) => work() };
+  const task = provider.generate(input, execution);
+  controller.abort();
+  await assert.rejects(task, error => (error as Error).name === 'AbortError');
+  assert.equal(signal?.aborted, true); assert.equal(calls, 1);
+});
 async function blobUrl(value: FormDataEntryValue) {
   assert.ok(value instanceof Blob);
   return 'data:image/png;base64,' + Buffer.from(await value.arrayBuffer()).toString('base64');

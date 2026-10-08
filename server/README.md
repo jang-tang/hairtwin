@@ -86,6 +86,10 @@ src/
 
 ## 실패 원인 로그
 
+화면은 `/api/ai/jobs/generate`, `/api/ai/jobs/edit`로 작업을 시작하고 `/api/ai/jobs/:id`를 조회합니다. `/cancel`은 진행 중 요청을 중단하고 `/retry`는 성공한 이미지를 재사용합니다. SQLite 체크포인트·단일 프로세스 작업 관리·검토 저장은 [AI 파이프라인](../AI_PIPELINE.md)을 참고하세요.
+
+비동기 실패는 `ai.job.failed` 이벤트에 작업·이미지 단계·오류 ID를 기록합니다. HTTP 시작 요청이 성공했더라도 작업 상태가 `failed`일 수 있으므로 작업 조회 결과를 확인해야 합니다.
+
 서버는 요청마다 UUID를 생성해 `X-Request-ID` 응답 헤더에 넣습니다. 오류 응답의 `error.requestId`와 같은 값이며, 프론트의 오류 메시지에도 `오류 ID`로 표시됩니다. 브라우저 개발자 콘솔의 `[api.failed]`와 서버 터미널의 `request.failed`를 이 ID로 연결할 수 있습니다.
 
 중앙 오류 처리기는 개발·운영 모드 모두에서 stderr에 JSON 한 줄을 출력합니다. 4xx는 `warn`, 5xx는 `error`입니다. 입력 검증, 인증, 404, 요청 제한, 잘못된 JSON, 처리 중 예외를 기록합니다.

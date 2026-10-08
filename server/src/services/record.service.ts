@@ -3,6 +3,7 @@ import { badRequest, notFound, conflict, pageMeta, parsePaging } from '../utils/
 import * as repo from '../repositories/record.repo.js';
 import { findCustomerByName } from '../repositories/customer.repo.js';
 import { findSession } from '../repositories/ai.repo.js';
+import { stylistReviewSchema } from '../routes/schemas.js';
 
 function assertRecordInput(input: repo.RecordInput): void {
   if (!input.customerName?.trim()) throw badRequest('고객 이름을 입력해주세요.');
@@ -40,6 +41,11 @@ export function getRecord(designerId: string, id: string) {
 
 /** 상담 완료: 기록 저장 + 고객 통계 갱신을 한 트랜잭션으로 처리 */
 export function createRecord(designerId: string, input: repo.RecordInput) {
+  if (input.stylistReview) {
+    input = { ...input, stylistReview: stylistReviewSchema.parse(input.stylistReview) };
+    if (!input.selectedVersionId || input.stylistReview!.versionId !== input.selectedVersionId)
+      throw badRequest('선택한 이미지 버전을 다시 검토해주세요.');
+  }
   if (input.sessionId || input.selectedVersionId) {
     if (!input.sessionId || !input.selectedVersionId) throw badRequest('상담 세션과 선택 버전이 필요합니다.');
     const session = findSession(designerId, input.sessionId);
@@ -50,6 +56,7 @@ export function createRecord(designerId: string, input: repo.RecordInput) {
       if (prior.selected_version_id !== input.selectedVersionId) throw conflict('이미 다른 버전으로 완료한 상담입니다.');
       return repo.toPublicRecord(prior);
     }
+    if (!input.stylistReview) throw badRequest('디자이너 검토를 완료해주세요.');
     const candidate = session.candidates.find(c => c.id === selected.candidateId)!;
     input = { ...input, views: selected.views, styleName: candidate.name, condition: selected.settings.condition,
       customerName: session.input.customerName, intent: session.input.intent };

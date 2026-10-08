@@ -103,6 +103,22 @@ const MIGRATIONS: { version: number; name: string; sql: string }[] = [
     ALTER TABLE consultation_records ADD COLUMN selected_version_id TEXT REFERENCES ai_versions(id);
     `,
   },
+  {
+    version: 3, name: 'ai_jobs_and_stylist_review',
+    sql: `
+    CREATE TABLE ai_jobs (
+      id TEXT PRIMARY KEY,
+      designer_id TEXT NOT NULL REFERENCES designers(id),
+      operation TEXT NOT NULL,
+      request_id TEXT NOT NULL,
+      state_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(designer_id, operation, request_id)
+    );
+    ALTER TABLE consultation_records ADD COLUMN stylist_review_json TEXT;
+    `,
+  },
 ];
 
 let db: DatabaseSync | null = null;

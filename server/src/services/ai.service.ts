@@ -1,6 +1,6 @@
 import { getImageProvider } from '../providers/image/index.js';
 import { readPng, regionBounds } from '../providers/image/png.js';
-import { VIEW_KEYS, type EditRequest, type GenerateInput, type GenerationResult, type EditResult, type ImageVersion } from '../providers/image/types.js';
+import { VIEW_KEYS, type EditRequest, type GenerateInput, type GenerationResult, type EditResult, type ImageVersion, type ImageExecution } from '../providers/image/types.js';
 import { badRequest, notFound, conflict } from '../utils/http.js';
 import { newId, nowIso } from '../utils/ids.js';
 import { getPreset } from './preset.service.js';
@@ -19,21 +19,25 @@ export function getSession(designerId: string, id: string): GenerationResult {
   if (!session) throw notFound('상담 이미지 세션을 찾을 수 없습니다.');
   return publicSession(session);
 }
-export async function generate(designerId: string, input: GenerateInput): Promise<GenerationResult> {
+export function prepareGeneration(designerId: string, input: GenerateInput): GenerateInput {
+  for (const view of VIEW_KEYS) readPng(input.photos[view]);
+  let preset = input.preset;
+  if (input.presetId && !builtinIds.has(input.presetId)) {
+    preset = { ...getPreset(designerId, input.presetId), refImages: input.preset.refImages ?? [] };
+  }
+  for (const ref of preset.refImages ?? []) readPng(ref);
+  return { ...input, preset };
+}
+export async function generate(designerId: string, input: GenerateInput, execution?: ImageExecution): Promise<GenerationResult> {
   const existing = repo.findByRequest(designerId, input.requestId);
   if (existing) return publicSession(existing);
   const key = designerId + ':' + input.requestId;
   if (generating.has(key)) return generating.get(key)!;
   const task = (async () => {
-    for (const view of VIEW_KEYS) readPng(input.photos[view]);
-    const resolved = { ...input };
-    if (input.presetId && !builtinIds.has(input.presetId)) {
-      resolved.preset = getPreset(designerId, input.presetId);
-      // Raster reference images are normalized by the browser; canonical text comes from owned DB preset.
-      resolved.preset = { ...resolved.preset, refImages: input.preset.refImages ?? [] };
-    }
-    for (const ref of resolved.preset.refImages ?? []) readPng(ref);
-    const provider = getImageProvider(), out = await provider.generate(resolved);
+    // Job input has already been resolved and frozen before its first image.
+    const resolved = execution ? input : prepareGeneration(designerId, input);
+    const provider = getImageProvider(), out = await provider.generate(resolved, execution);
+    execution?.signal.throwIfAborted();
     if (out.candidates.length !== 3) throw badRequest('후보 3개가 필요합니다.');
     for (const c of out.candidates) for (const view of VIEW_KEYS) readPng(c.views[view]);
     return publicSession(repo.createSession(designerId, resolved, out.candidates, provider.kind));
@@ -41,7 +45,7 @@ export async function generate(designerId: string, input: GenerateInput): Promis
   generating.set(key, task);
   try { return await task; } finally { generating.delete(key); }
 }
-export async function edit(designerId: string, input: EditRequest): Promise<EditResult> {
+export async function edit(designerId: string, input: EditRequest, execution?: ImageExecution): Promise<EditResult> {
   const session = repo.findSession(designerId, input.sessionId);
   if (!session) throw notFound('상담 이미지 세션을 찾을 수 없습니다.');
   const base = session.versions.find(v => v.id === input.baseVersionId);
@@ -59,7 +63,8 @@ export async function edit(designerId: string, input: EditRequest): Promise<Edit
   regionBounds(source.width, source.height, input.region);
   const candidate = session.candidates.find(c => c.id === base.candidateId)!;
   const task = (async () => {
-    const out = await provider.edit({ ...input, views: base.views, original: session.input, candidate });
+    const out = await provider.edit({ ...input, views: base.views, original: session.input, candidate }, execution);
+    execution?.signal.throwIfAborted();
     for (const view of VIEW_KEYS) readPng(out.views[view]);
     const count = session.versions.filter(v => v.candidateId === base.candidateId).length;
     const version: ImageVersion = {

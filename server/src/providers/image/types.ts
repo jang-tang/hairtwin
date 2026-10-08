@@ -37,8 +37,28 @@ export interface GenerationResult {
   mock: boolean; provider: 'mock' | 'real';
 }
 export interface EditResult { version: ImageVersion; mock: boolean; provider: 'mock' | 'real'; summary: string }
+export interface ImageExecution {
+  signal: AbortSignal;
+  image: (id: string, work: () => Promise<string>) => Promise<string>;
+}
+export interface JobError { code: string; message: string; requestId: string }
+export interface ImageStep {
+  id: string; candidateId: string; view: View;
+  status: 'pending' | 'running' | 'completed' | 'failed'; error?: JobError;
+}
+export interface AiJob {
+  id: string; operation: 'generate' | 'edit';
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+  steps: ImageStep[]; completed: number; total: number; progress: number;
+  attempt: number; error?: JobError; result?: GenerationResult | EditResult;
+}
+export interface StylistReview {
+  versionId: string; possible: '가능' | '조건부 가능' | '어려움';
+  curl: '약' | '중' | '강'; sideControl: '자연스럽게' | '다운' | '볼륨 유지';
+  notes: string[]; memo: string;
+}
 export interface ImageProvider {
   readonly kind: 'mock' | 'real';
-  generate(input: GenerateInput): Promise<{ candidates: GeneratedCandidate[]; mock: boolean }>;
-  edit(input: EditInput): Promise<{ views: TriView; mock: boolean; summary: string }>;
+  generate(input: GenerateInput, execution?: ImageExecution): Promise<{ candidates: GeneratedCandidate[]; mock: boolean }>;
+  edit(input: EditInput, execution?: ImageExecution): Promise<{ views: TriView; mock: boolean; summary: string }>;
 }

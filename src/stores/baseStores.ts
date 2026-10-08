@@ -120,6 +120,7 @@ export const useDash = create<DashState>()(
               condition: r.condition,
               sessionId: r.sessionId,
               selectedVersionId: r.selectedVersionId,
+              stylistReview: r.stylistReview,
             });
             await get().refresh();
             return;

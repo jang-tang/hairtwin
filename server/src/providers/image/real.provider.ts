@@ -3,7 +3,8 @@ import { AppError } from '../../utils/http.js';
 import { causeDiagnostic, diagnosticIdentifier, type ErrorDiagnostics } from '../../utils/errorLog.js';
 import { createMask, preserveOutside, readPng } from './png.js';
 import { DIRECTIONS, generationPrompt, editPrompt, editSummary, settingsText } from './prompts.js';
-import { VIEW_KEYS, type EditInput, type GenerateInput, type ImageProvider, type TriView } from './types.js';
+import { VIEW_KEYS, type EditInput, type GenerateInput, type ImageProvider, type TriView, type ImageExecution, type GeneratedCandidate } from './types.js';
+import { runImage, collectImages } from './execution.js';
 
 type ImageCall = Pick<NonNullable<ErrorDiagnostics['ai']>, 'operation' | 'phase' | 'candidateId' | 'view'>;
 
@@ -11,7 +12,7 @@ export class RealImageProvider implements ImageProvider {
   readonly kind = 'real' as const;
   constructor(private transport: typeof fetch = fetch, private key = config.openaiApiKey) {}
 
-  private async image(prompt: string, images: string[], context: ImageCall, mask?: Buffer): Promise<string> {
+  private async image(prompt: string, images: string[], context: ImageCall, mask?: Buffer, signal?: AbortSignal): Promise<string> {
     const fail = (reason: NonNullable<ErrorDiagnostics['ai']>['reason'], message: string,
       extra: Partial<NonNullable<ErrorDiagnostics['ai']>> = {}, cause?: unknown) =>
       new AppError(reason === 'not_configured' ? 503 : 502, reason === 'not_configured' ? 'AI_NOT_CONFIGURED' : 'EXTERNAL_API_ERROR', message,
@@ -32,9 +33,10 @@ export class RealImageProvider implements ImageProvider {
     try {
       response = await this.transport('https://api.openai.com/v1/images/edits', {
         method: 'POST', headers: { Authorization: 'Bearer ' + this.key }, body: form,
-        signal: AbortSignal.timeout(180_000),
+        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(180_000)]) : AbortSignal.timeout(180_000),
       });
     } catch (error) {
+      signal?.throwIfAborted();
       const timeout = ['TimeoutError', 'AbortError'].includes((error as Error)?.name);
       throw fail(timeout ? 'timeout' : 'network', timeout ? '이미지 생성 시간이 초과됐습니다. 다시 시도해주세요.' : '이미지 서버에 연결하지 못했습니다. 다시 시도해주세요.', {}, error);
     }
@@ -63,38 +65,40 @@ export class RealImageProvider implements ImageProvider {
     return src;
   }
 
-  async generate(input: GenerateInput) {
-    const candidates = [];
+  async generate(input: GenerateInput, execution?: ImageExecution) {
+    const candidates: GeneratedCandidate[] = [];
     // Three distinct prompts, with an anchor shared only within each candidate.
-    for (const direction of DIRECTIONS) {
+    await collectImages(execution, DIRECTIONS.map(direction => async () => {
       const refs = (input.preset.refImages ?? []).slice(0, 2);
-      const front = await this.image(generationPrompt(input, direction, 'front', false), [input.photos.front, input.photos.side, input.photos.back, ...refs],
-        { operation: 'generate', phase: 'anchor', candidateId: direction.id, view: 'front' });
+      const front = await runImage(execution, direction.id + ':front', () => this.image(generationPrompt(input, direction, 'front', false), [input.photos.front, input.photos.side, input.photos.back, ...refs],
+        { operation: 'generate', phase: 'anchor', candidateId: direction.id, view: 'front' }, undefined, execution?.signal));
       const views: TriView = { front, side: '', back: '' };
-      for (const view of ['side', 'back'] as const) {
-        views[view] = await this.image(generationPrompt(input, direction, view, true), [input.photos[view], front, ...refs],
-          { operation: 'generate', phase: 'propagate', candidateId: direction.id, view });
-      }
+      await collectImages(execution, (['side', 'back'] as const).map(view => async () => {
+        views[view] = await runImage(execution, direction.id + ':' + view, () => this.image(generationPrompt(input, direction, view, true), [input.photos[view], front, ...refs],
+          { operation: 'generate', phase: 'propagate', candidateId: direction.id, view }, undefined, execution?.signal));
+      }));
       candidates.push({ id: direction.id, name: direction.name, desc: direction.desc, views });
-    }
+    }));
     return { candidates, mock: false };
   }
 
-  async edit(input: EditInput) {
+  async edit(input: EditInput, execution?: ImageExecution) {
     const source = input.views[input.view], other = VIEW_KEYS.filter(v => v !== input.view);
-    const result = await this.image(editPrompt(input), [source, ...other.map(v => input.views[v])],
-      { operation: 'edit', phase: 'anchor', candidateId: input.candidate.id, view: input.view }, createMask(source, input.region));
-    const anchor = preserveOutside(source, result, input.region);
+    const anchor = await runImage(execution, input.candidate.id + ':' + input.view, async () => {
+      const result = await this.image(editPrompt(input), [source, ...other.map(v => input.views[v])],
+        { operation: 'edit', phase: 'anchor', candidateId: input.candidate.id, view: input.view }, createMask(source, input.region), execution?.signal);
+      return preserveOutside(source, result, input.region);
+    });
     const views = { ...input.views, [input.view]: anchor };
-    for (const view of other) {
-      views[view] = await this.image([
+    await collectImages(execution, other.map(view => async () => {
+      views[view] = await runImage(execution, input.candidate.id + ':' + view, () => this.image([
         'Image 1 is the existing ' + view + ' view. Image 2 is the just-edited ' + input.view + ' anchor. Image 3 is the original customer in this view.',
         'Update ONLY the hairstyle to match the anchor, preserving identity, pose, clothing, lighting and background. Do not change viewpoint.',
         'Adjustments: ' + editSummary(input) + '. Hair constraints: ' + settingsText(input),
         'Output one ' + view + ' view in 1024x1024 PNG, no text or collage.',
       ].join('\n'), [input.views[view], anchor, input.original.photos[view]],
-        { operation: 'edit', phase: 'propagate', candidateId: input.candidate.id, view });
-    }
+        { operation: 'edit', phase: 'propagate', candidateId: input.candidate.id, view }, undefined, execution?.signal));
+    }));
     return { views, mock: false, summary: editSummary(input) };
   }
 }

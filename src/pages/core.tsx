@@ -4,6 +4,7 @@ import { AppShell, PrimaryButton, SecondaryButton, PageHeader, Chip, Segmented }
 import { useAuth, useDash, useUi } from '../stores/baseStores';
 import { useConsult, routeMap } from '../stores/consultationStore';
 import { api, getToken } from '../api/server';
+import { ReviewSummary } from './flow2';
 import type { ConsultationRecord } from '../types';
 import type { ImageVersion } from '../../server/src/providers/image/types';
 import {
@@ -330,6 +331,7 @@ export function RecordDetailPage() {
           </p>
         </div>
       )}
+      {r.stylistReview && <ReviewSummary review={r.stylistReview} />}
       <PrimaryButton to="/dashboard">확인</PrimaryButton>
     </AppShell>
   );

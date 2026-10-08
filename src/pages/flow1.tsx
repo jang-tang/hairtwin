@@ -7,7 +7,9 @@ import { usePresets, presetSummary } from '../stores/presetStore';
 import { useDash, useUi } from '../stores/baseStores';
 import { PRESETS, img, BANG_QUICK, bangLabel } from '../data';
 import { mockPortrait, isMockMode } from '../mocks/mockImages';
-import { requestGeneration } from '../api/aiClient';
+import { useAiJob } from '../hooks/useAiJob';
+import { AiJobProgress } from '../components/AiJobProgress';
+import type { GenerationResult } from '../../server/src/providers/image/types';
 
 function StepDots({ step, total }: { step: number; total: number }) {
   return <PageHeader title="" sub="" step={step} total={total} />;
@@ -221,7 +223,7 @@ export function ConditionPage() {
       <BangBlock />
       <div className="flex gap-2 mt-4">
         <SecondaryButton onClick={() => transitionTo('style', nav)}>이전</SecondaryButton>
-        <div className="flex-1"><PrimaryButton onClick={() => { set({ generationRequestId: crypto.randomUUID(), sessionId: null, candidates: [], versions: [], chosenVersion: '', selectedCandidate: null }); transitionTo('generation', nav); }}>AI로 3가지 방향 만들기</PrimaryButton></div>
+        <div className="flex-1"><PrimaryButton onClick={() => { set({ generationRequestId: crypto.randomUUID(), generationJobId: '', editJobId: '', editRequestId: '', sessionId: null, candidates: [], versions: [], chosenVersion: '', selectedCandidate: null }); transitionTo('generation', nav); }}>AI로 3가지 방향 만들기</PrimaryButton></div>
       </div>
     </AppShell>
   );
@@ -252,7 +254,16 @@ export function BangBlock() {
 export function GenerationPage() {
   const nav = useNavigate();
   const [err, setErr] = useState(''), [attempt, setAttempt] = useState(0);
+  const work = useAiJob('generate');
   useEffect(() => {
+    if (work.job?.status !== 'completed' || !work.job.result) return;
+    useConsult.getState().acceptGeneration(work.job.result as GenerationResult);
+    transitionTo('candidates', nav);
+  }, [work.job, nav]);
+  useEffect(() => {
+    if (work.id) return;
+    const saved = useConsult.getState();
+    if (saved.sessionId && saved.candidates.length) { transitionTo('candidates', nav); return; }
     let live = true;
     setErr('');
     (async () => {
@@ -266,28 +277,25 @@ export function GenerationPage() {
         const requestId = s.generationRequestId || crypto.randomUUID();
         s.set({ generationRequestId: requestId });
         const refs = await Promise.all(preset.refImages.slice(0, 2).map(normalizePhoto));
-        const res = await requestGeneration({
+        if (!live) return;
+        await work.start({
           requestId, customerName: s.customerName, intent: s.intent,
           photos: { front: s.photos.front, side: s.photos.side, back: s.photos.back },
           presetId: s.presetId ?? undefined, preset: { ...preset, refImages: refs },
           condition: s.condition, bang: s.bang, sideLength: s.sideLength, sideHair: s.sideHair,
         });
-        if (!live) return;
-        useConsult.getState().acceptGeneration(res);
-        transitionTo('candidates', nav);
       } catch (e) { if (live) setErr(e instanceof Error ? e.message : '생성에 실패했어요. 다시 시도해주세요.'); }
     })();
     return () => { live = false; };
-  }, [attempt]);
+  }, [attempt, work.id, work.start]);
   return (
     <AppShell>
       <PageHeader title="3가지 방향을 만들고 있어요." sub="고객 사진과 상담 조건을 반영해 후보별로 앞·옆·뒤를 준비해요." step={6} total={TOTAL} />
-      <div className="border border-line rounded-3xl p-10 text-center">
-        {err ? <><p role="alert" className="text-error mb-4">{err}</p><PrimaryButton onClick={() => setAttempt(n => n + 1)}>다시 시도</PrimaryButton></> :
-          <><div className="h-2 rounded-full bg-line overflow-hidden mb-5"><div className="h-full w-2/5 bg-primary rounded-full ht-progress" /></div>
-          <p className="font-bold text-[18px]">세 방향의 후보 이미지를 준비하는 중…</p><p className="text-secondary mt-2">후보별로 같은 스타일을 이어가며 생성하므로 잠시 시간이 걸려요.</p></>}
-      </div>
-      <div className="mt-4"><SecondaryButton onClick={() => transitionTo('condition', nav)}>상담 조건으로 돌아가기</SecondaryButton></div>
+      <AiJobProgress job={work.job} error={err || work.error} sending={work.sending} onCancel={work.cancel} onRetry={work.retry} />
+      {err && !work.id && <div className="mt-4"><PrimaryButton onClick={() => setAttempt(n => n + 1)}>작업 시작 다시 시도</PrimaryButton></div>}
+      <div className="mt-4"><SecondaryButton disabled={work.busy} onClick={() => {
+        work.clear(); useConsult.getState().set({ generationRequestId: '' }); transitionTo('condition', nav);
+      }}>상담 조건으로 돌아가기</SecondaryButton></div>
     </AppShell>
   );
 }

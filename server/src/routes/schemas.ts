@@ -78,6 +78,16 @@ export const recordQuery = pagingQuery.extend({
   customerId: z.string().max(64).optional(),
 });
 
+export const stylistReviewSchema = z.object({
+  versionId: z.string().min(1).max(64),
+  possible: z.enum(['가능', '조건부 가능', '어려움']),
+  curl: z.enum(['약', '중', '강']), sideControl: z.enum(['자연스럽게', '다운', '볼륨 유지']),
+  notes: z.array(z.string().min(1).max(100)).max(10), memo: z.string().max(1000),
+}).superRefine((review, ctx) => {
+  if (review.possible !== '가능' && !review.memo.trim())
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['memo'], message: '시술 조건 또는 어려운 이유를 메모에 입력해주세요.' });
+});
+
 export const recordBody = z.object({
   customerId: z.string().max(64).optional(),
   customerName: z.string().min(1).max(30),
@@ -89,6 +99,7 @@ export const recordBody = z.object({
   condition: conditionSchema,
   sessionId: z.string().max(64).optional(),
   selectedVersionId: z.string().max(64).optional(),
+  stylistReview: stylistReviewSchema.optional(),
 });
 
 const regionSchema = z

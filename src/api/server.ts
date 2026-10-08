@@ -7,7 +7,7 @@
  */
 import type { ConsultationRecord, Customer } from '../types';
 import type { StylistPreset } from '../stores/presetStore';
-import type { GenerateInput, GenerationResult, EditRequest, EditResult } from '../../server/src/providers/image/types';
+import type { GenerateInput, GenerationResult, EditRequest, EditResult, AiJob } from '../../server/src/providers/image/types';
 
 const BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? '/api';
 const TOKEN_KEY = 'ht-token';
@@ -127,10 +127,16 @@ export const api = {
       condition: ConsultationRecord['condition'];
       sessionId?: string;
       selectedVersionId?: string;
+      stylistReview?: ConsultationRecord['stylistReview'];
     }) => request<ConsultationRecord>('/records', { method: 'POST', body: JSON.stringify(r) }),
   },
 
   ai: {
+    startGeneration: (body: GenerateInput) => request<AiJob>('/ai/jobs/generate', { method: 'POST', body: JSON.stringify(body) }),
+    startEdit: (body: EditRequest) => request<AiJob>('/ai/jobs/edit', { method: 'POST', body: JSON.stringify(body) }),
+    job: (id: string) => request<AiJob>(`/ai/jobs/${encodeURIComponent(id)}`),
+    cancelJob: (id: string) => request<AiJob>(`/ai/jobs/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
+    retryJob: (id: string) => request<AiJob>(`/ai/jobs/${encodeURIComponent(id)}/retry`, { method: 'POST' }),
     session: (id: string) => request<GenerationResult>(`/ai/sessions/${encodeURIComponent(id)}`),
     generate: (body: GenerateInput) =>
       request<GenerationResult>(

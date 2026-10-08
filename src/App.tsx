@@ -4,7 +4,7 @@ import { AppShell, PrimaryButton } from './components/ui';
 import { useAuth } from './stores/baseStores';
 import { LoginPage, DashboardPage, CustomersPage, CustomerDetailPage, RecordDetailPage, PresetsPage, PresetEditPage } from './pages/core';
 import { StartPage, IntentPage, PhotoPage, StylePage, ConditionPage, GenerationPage } from './pages/flow1';
-import { CandidatesPage, FeedbackPage, InterpretationPage, ComparisonPage, FinalizePage, ReportPage } from './pages/flow2';
+import { CandidatesPage, FeedbackPage, InterpretationPage, ComparisonPage, StylistReviewPage, FinalizePage, ReportPage } from './pages/flow2';
 import { routeMap, useConsult } from './stores/consultationStore';
 
 function RequireAuth({ children }: { children: JSX.Element }) {
@@ -73,7 +73,7 @@ export default function App() {
           <Route path={routeMap.feedback} element={<RequireAuth><FeedbackPage /></RequireAuth>} />
           <Route path={routeMap.interpretation} element={<RequireAuth><InterpretationPage /></RequireAuth>} />
           <Route path={routeMap.comparison} element={<RequireAuth><ComparisonPage /></RequireAuth>} />
-          <Route path={routeMap.stylistReview} element={<Navigate to={routeMap.finalize} replace />} />
+          <Route path={routeMap.stylistReview} element={<RequireAuth><StylistReviewPage /></RequireAuth>} />
           <Route path={routeMap.finalize} element={<RequireAuth><FinalizePage /></RequireAuth>} />
           <Route path={routeMap.report} element={<RequireAuth><ReportPage /></RequireAuth>} />
           <Route path="*" element={<NotFound />} />

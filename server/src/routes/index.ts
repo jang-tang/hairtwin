@@ -56,6 +56,11 @@ export function buildRouter(): Router {
   r.delete('/records/:id', requireAuth, validate({ params: idParam }), rc.remove);
 
   // AI 이미지 (서버에서 키 사용. 키 없으면 mock provider)
+  r.post('/ai/jobs/generate', requireAuth, validate({ body: aiGenerateBody }), ac.startGeneration);
+  r.post('/ai/jobs/edit', requireAuth, validate({ body: aiEditBody }), ac.startEdit);
+  r.get('/ai/jobs/:id', requireAuth, validate({ params: idParam }), ac.getJob);
+  r.post('/ai/jobs/:id/cancel', requireAuth, validate({ params: idParam }), ac.cancelJob);
+  r.post('/ai/jobs/:id/retry', requireAuth, validate({ params: idParam }), ac.retryJob);
   r.post('/ai/generate', requireAuth, validate({ body: aiGenerateBody }), ac.generate);
   r.post('/ai/edit', requireAuth, validate({ body: aiEditBody }), ac.edit);
   r.get('/ai/sessions/:id', requireAuth, validate({ params: idParam }), ac.getSession);

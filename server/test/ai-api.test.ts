@@ -74,7 +74,8 @@ test('invalid masks and failed edits do not append versions; sessions are owner 
   assert.equal((await request('/ai/edit','POST',{...body,region:null},otherToken)).status,404);
 });
 test('record stores the selected returned images and retains session history through DB reopening',async()=>{
-  const body={customerName:input.customerName,views:input.photos,sessionId:generated.sessionId,selectedVersionId:edited.version.id};
+  const body={customerName:input.customerName,views:input.photos,sessionId:generated.sessionId,selectedVersionId:edited.version.id,
+    stylistReview:{versionId:edited.version.id,possible:'가능',curl:'중',sideControl:'다운',notes:[],memo:''}};
   const record=await request('/records','POST',body);assert.equal(record.status,201);
   assert.deepEqual(record.data.views,edited.version.views);
   assert.equal(record.data.selectedVersionId,edited.version.id);
