@@ -1,5 +1,5 @@
 import bcrypt from 'bcryptjs';
-import { getDb } from '../db/database.js';
+import { getDb, transaction } from '../db/database.js';
 import { config } from '../config.js';
 import { badRequest, unauthorized } from '../utils/http.js';
 import { signToken } from '../utils/jwt.js';
@@ -20,15 +20,17 @@ export async function login(input: { name: string; password?: string }): Promise
 
   if (config.authProvider === 'real') {
     if (!input.password) throw badRequest('비밀번호를 입력해주세요.');
-    const row = findDesignerByName(name, db);
+    const row = (await findDesignerByName(name, db));
     if (!row || !row.password_hash) throw unauthorized('존재하지 않는 사용자이거나 비밀번호가 필요합니다.');
     const ok = await bcrypt.compare(input.password, row.password_hash);
     if (!ok) throw unauthorized('이름 또는 비밀번호가 올바르지 않습니다.');
     return { token: signToken({ sub: row.id, name: row.name }), designer: toPublicDesigner(row) };
   }
 
-  let row = findDesignerByName(name, db);
-  if (!row) row = createDesigner(name, null, db);
+  const row = await transaction(async tx => {
+    await tx.lock('designer:' + name);
+    return await findDesignerByName(name, tx) ?? await createDesigner(name, null, tx);
+  });
   return { token: signToken({ sub: row.id, name: row.name }), designer: toPublicDesigner(row) };
 }
 
@@ -36,15 +38,17 @@ export async function register(input: { name: string; password: string }): Promi
   const name = input.name?.trim();
   if (!name) throw badRequest('이름을 입력해주세요.');
   if (!input.password || input.password.length < 4) throw badRequest('비밀번호는 4자 이상 입력해주세요.');
-  const db = getDb();
-  if (findDesignerByName(name, db)) throw badRequest('이미 등록된 이름입니다.');
   const hash = await bcrypt.hash(input.password, 10);
-  const row = createDesigner(name, hash, db);
+  const row = await transaction(async tx => {
+    await tx.lock('designer:' + name);
+    if (await findDesignerByName(name, tx)) throw badRequest('이미 등록된 이름입니다.');
+    return createDesigner(name, hash, tx);
+  });
   return { token: signToken({ sub: row.id, name: row.name }), designer: toPublicDesigner(row) };
 }
 
-export function me(designerId: string): PublicDesigner {
-  const row = findDesignerById(designerId, getDb());
+export async function me(designerId: string): Promise<PublicDesigner> {
+  const row = (await findDesignerById(designerId, getDb()));
   if (!row) throw unauthorized('사용자를 찾을 수 없습니다.');
   return toPublicDesigner(row);
 }

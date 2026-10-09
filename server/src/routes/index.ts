@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import { getDb } from '../db/database.js';
+import { config } from '../config.js';
 import { requireAuth } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import * as c from '../controllers/auth.controller.js';
@@ -26,8 +28,11 @@ import {
 export function buildRouter(): Router {
   const r = Router();
 
-  r.get('/health', (_req, res) => {
-    res.json({ ok: true, data: { status: 'up', time: new Date().toISOString() } });
+  r.get('/health', async (_req, res, next) => {
+    try {
+      await getDb().prepare('SELECT 1 AS connected').get();
+      res.json({ ok: true, data: { status: 'up', time: new Date().toISOString(), database: { provider: config.dbProvider, status: 'connected' } } });
+    } catch (error) { next(error); }
   });
 
   // 인증 (mock 모드: 이름만으로 로그인, 사용자 없으면 DB에 자동 생성)
@@ -56,8 +61,14 @@ export function buildRouter(): Router {
   r.delete('/records/:id', requireAuth, validate({ params: idParam }), rc.remove);
 
   // AI 이미지 (서버에서 키 사용. 키 없으면 mock provider)
+  r.post('/ai/jobs/generate', requireAuth, validate({ body: aiGenerateBody }), ac.startGeneration);
+  r.post('/ai/jobs/edit', requireAuth, validate({ body: aiEditBody }), ac.startEdit);
+  r.get('/ai/jobs/:id', requireAuth, validate({ params: idParam }), ac.getJob);
+  r.post('/ai/jobs/:id/cancel', requireAuth, validate({ params: idParam }), ac.cancelJob);
+  r.post('/ai/jobs/:id/retry', requireAuth, validate({ params: idParam }), ac.retryJob);
   r.post('/ai/generate', requireAuth, validate({ body: aiGenerateBody }), ac.generate);
   r.post('/ai/edit', requireAuth, validate({ body: aiEditBody }), ac.edit);
+  r.get('/ai/sessions/:id', requireAuth, validate({ params: idParam }), ac.getSession);
 
   void pagingQuery;
   return r;

@@ -1,49 +1,104 @@
 import { config } from '../../config.js';
-import type { EditInput, GenerateInput, ImageProvider } from './types.js';
+import { AppError } from '../../utils/http.js';
+import { causeDiagnostic, diagnosticIdentifier, type ErrorDiagnostics } from '../../utils/errorLog.js';
+import { createMask, preserveOutside, readPng } from './png.js';
+import { DIRECTIONS, generationPrompt, editPrompt, editSummary, settingsText } from './prompts.js';
+import { VIEW_KEYS, type EditInput, type GenerateInput, type ImageProvider, type TriView, type ImageExecution, type GeneratedCandidate } from './types.js';
+import { runImage, collectImages } from './execution.js';
 
-/**
- * Real 이미지 Provider (서버 전용, 키는 절대 프론트에 노출하지 않음).
- * - OPENAI_API_KEY가 있을 때만 사용. 없으면 factory에서 mock으로 폴백.
- * - 현재는 gpt-image-1 계열 엔드포인트를 fetch로 직접 호출 (추가 SDK 없음).
- * - 반환은 프론트 TriView 형태에 맞춘 URL. 실제 이미지 바이트가 필요하면
- *   data-URL로 변환해 저장하도록 확장 가능.
- */
+type ImageCall = Pick<NonNullable<ErrorDiagnostics['ai']>, 'operation' | 'phase' | 'candidateId' | 'view'>;
+
 export class RealImageProvider implements ImageProvider {
   readonly kind = 'real' as const;
+  constructor(private transport: typeof fetch = fetch, private key = config.openaiApiKey) {}
 
-  private assertKey(): string {
-    if (!config.openaiApiKey) throw Object.assign(new Error('OPENAI_API_KEY가 설정되지 않았습니다.'), { status: 500 });
-    return config.openaiApiKey;
-  }
-
-  async generate(input: GenerateInput) {
-    const key = this.assertKey();
-    const prompt = `hairstyle consultation, preset ${input.presetId ?? ''} ${input.prompt ?? ''}`.trim();
-    const res = await fetch('https://api.openai.com/v1/images/generations', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-      body: JSON.stringify({ model: 'gpt-image-1', prompt, size: '1024x1024', n: 1 }),
+  private async image(prompt: string, images: string[], context: ImageCall, mask?: Buffer, signal?: AbortSignal): Promise<string> {
+    const fail = (reason: NonNullable<ErrorDiagnostics['ai']>['reason'], message: string,
+      extra: Partial<NonNullable<ErrorDiagnostics['ai']>> = {}, cause?: unknown) =>
+      new AppError(reason === 'not_configured' ? 503 : 502, reason === 'not_configured' ? 'AI_NOT_CONFIGURED' : 'EXTERNAL_API_ERROR', message,
+        undefined, { ai: { ...context, model: config.imageModel, reason, ...extra }, ...(cause ? { cause: causeDiagnostic(cause) } : {}) });
+    if (!this.key) throw fail('not_configured', '실제 AI를 사용하려면 서버 API 키를 설정해주세요.');
+    const form = new FormData();
+    form.set('model', config.imageModel);
+    form.set('prompt', prompt); form.set('size', '1024x1024'); form.set('n', '1');
+    form.set('output_format', 'png'); form.set('quality', 'medium');
+    if (['gpt-image-1', 'gpt-image-1.5'].includes(config.imageModel)) form.set('input_fidelity', 'high');
+    images.forEach((src, i) => {
+      readPng(src);
+      const bytes = Buffer.from(src.split(',')[1], 'base64');
+      form.append('image[]', new Blob([new Uint8Array(bytes)], { type: 'image/png' }), 'reference-' + i + '.png');
     });
-    if (!res.ok) throw Object.assign(new Error(`이미지 생성 실패 (${res.status})`), { status: 502 });
-    const json = (await res.json()) as { data?: { url?: string; b64_json?: string }[] };
-    const first = json.data?.[0];
-    const url = first?.url ?? (first?.b64_json ? `data:image/png;base64,${first.b64_json}` : '');
-    if (!url) throw Object.assign(new Error('이미지 생성 결과가 비어 있습니다.'), { status: 502 });
-    const views = { front: url, side: url, back: url };
-    return {
-      candidates: [
-        { id: 'A', name: 'AI 제안 A', desc: prompt.slice(0, 40), views },
-        { id: 'B', name: 'AI 제안 B', desc: prompt.slice(0, 40), views },
-        { id: 'C', name: 'AI 제안 C', desc: prompt.slice(0, 40), views },
-      ],
-      mock: false as const,
-    };
+    if (mask) form.set('mask', new Blob([new Uint8Array(mask)], { type: 'image/png' }), 'mask.png');
+    let response: Response;
+    try {
+      response = await this.transport('https://api.openai.com/v1/images/edits', {
+        method: 'POST', headers: { Authorization: 'Bearer ' + this.key }, body: form,
+        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(180_000)]) : AbortSignal.timeout(180_000),
+      });
+    } catch (error) {
+      signal?.throwIfAborted();
+      const timeout = ['TimeoutError', 'AbortError'].includes((error as Error)?.name);
+      throw fail(timeout ? 'timeout' : 'network', timeout ? '이미지 생성 시간이 초과됐습니다. 다시 시도해주세요.' : '이미지 서버에 연결하지 못했습니다. 다시 시도해주세요.', {}, error);
+    }
+    const upstreamRequestId = diagnosticIdentifier(response.headers.get('x-request-id'));
+    if (!response.ok) {
+      let upstreamCode: string | undefined, upstreamType: string | undefined;
+      try {
+        const result = await response.json() as { error?: { code?: unknown; type?: unknown } };
+        upstreamCode = diagnosticIdentifier(result?.error?.code); upstreamType = diagnosticIdentifier(result?.error?.type);
+      } catch { /* Non-JSON failures still retain status and request ID. */ }
+      const reason = upstreamCode === 'insufficient_quota' || upstreamCode === 'billing_hard_limit_reached' ? 'AI 사용 한도 또는 결제 설정을 확인해주세요.'
+        : response.status === 429 ? 'AI 요청 한도를 초과했습니다. 잠시 후 다시 시도해주세요.'
+        : response.status === 401 ? 'AI 서버 인증에 실패했습니다. 서버 키 설정을 확인해주세요.'
+        : response.status === 403 ? 'AI 모델 접근 권한을 확인해주세요.'
+        : upstreamCode === 'content_policy_violation' || upstreamCode === 'moderation_blocked' ? '이미지 요청이 AI 정책 검사에서 거절됐습니다.'
+        : '이미지 처리에 실패했습니다.';
+      throw fail('upstream', reason + ' (' + response.status + ')', { upstreamStatus: response.status, upstreamRequestId, upstreamCode, upstreamType });
+    }
+    let src: string;
+    try {
+      const result = await response.json() as { data?: { b64_json?: string }[] };
+      if (!result.data?.[0]?.b64_json) throw new Error('empty');
+      src = 'data:image/png;base64,' + result.data[0].b64_json;
+      readPng(src);
+    } catch (error) { throw fail('invalid_output', '이미지 서버가 올바른 PNG 결과를 반환하지 않았습니다.', { upstreamStatus: response.status, upstreamRequestId }, error); }
+    return src;
   }
 
-  async edit(input: EditInput) {
-    this.assertKey();
-    // 편집은 생성과 동일한 엔드포인트로 위임 (마스크 고도화는 추후 확장).
-    // 여기서는 요약만 반환하고 실제 합성은 generate 경로 재사용을 권장.
-    return { ok: true, mock: false as const, summary: `앞머리 ${input.bang} · ${(input.feedback ?? []).slice(0, 2).join(' · ')}` };
+  async generate(input: GenerateInput, execution?: ImageExecution) {
+    const candidates: GeneratedCandidate[] = [];
+    // Three distinct prompts, with an anchor shared only within each candidate.
+    await collectImages(execution, DIRECTIONS.map(direction => async () => {
+      const refs = (input.preset.refImages ?? []).slice(0, 2);
+      const front = await runImage(execution, direction.id + ':front', () => this.image(generationPrompt(input, direction, 'front', false), [input.photos.front, input.photos.side, input.photos.back, ...refs],
+        { operation: 'generate', phase: 'anchor', candidateId: direction.id, view: 'front' }, undefined, execution?.signal));
+      const views: TriView = { front, side: '', back: '' };
+      await collectImages(execution, (['side', 'back'] as const).map(view => async () => {
+        views[view] = await runImage(execution, direction.id + ':' + view, () => this.image(generationPrompt(input, direction, view, true), [input.photos[view], front, ...refs],
+          { operation: 'generate', phase: 'propagate', candidateId: direction.id, view }, undefined, execution?.signal));
+      }));
+      candidates.push({ id: direction.id, name: direction.name, desc: direction.desc, views });
+    }));
+    return { candidates, mock: false };
+  }
+
+  async edit(input: EditInput, execution?: ImageExecution) {
+    const source = input.views[input.view], other = VIEW_KEYS.filter(v => v !== input.view);
+    const anchor = await runImage(execution, input.candidate.id + ':' + input.view, async () => {
+      const result = await this.image(editPrompt(input), [source, ...other.map(v => input.views[v])],
+        { operation: 'edit', phase: 'anchor', candidateId: input.candidate.id, view: input.view }, createMask(source, input.region), execution?.signal);
+      return preserveOutside(source, result, input.region);
+    });
+    const views = { ...input.views, [input.view]: anchor };
+    await collectImages(execution, other.map(view => async () => {
+      views[view] = await runImage(execution, input.candidate.id + ':' + view, () => this.image([
+        'Image 1 is the existing ' + view + ' view. Image 2 is the just-edited ' + input.view + ' anchor. Image 3 is the original customer in this view.',
+        'Update ONLY the hairstyle to match the anchor, preserving identity, pose, clothing, lighting and background. Do not change viewpoint.',
+        'Adjustments: ' + editSummary(input) + '. Hair constraints: ' + settingsText(input),
+        'Output one ' + view + ' view in 1024x1024 PNG, no text or collage.',
+      ].join('\n'), [input.views[view], anchor, input.original.photos[view]],
+        { operation: 'edit', phase: 'propagate', candidateId: input.candidate.id, view }, undefined, execution?.signal));
+    }));
+    return { views, mock: false, summary: editSummary(input) };
   }
 }

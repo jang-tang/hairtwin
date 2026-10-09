@@ -7,10 +7,10 @@ export function PrimaryButton({ children, onClick, to, disabled }: { children: R
   if (to) return <Link to={to} className={cls}>{children}</Link>;
   return <button disabled={disabled} onClick={onClick} className={cls}>{children}</button>;
 }
-export function SecondaryButton({ children, onClick, to }: { children: React.ReactNode; onClick?: () => void; to?: string }) {
+export function SecondaryButton({ children, onClick, to, disabled }: { children: React.ReactNode; onClick?: () => void; to?: string; disabled?: boolean }) {
   const cls = 'min-h-[52px] px-6 rounded-2xl text-[16px] font-semibold border border-line bg-white text-ink active:bg-softBg flex items-center justify-center min-w-[44px]';
   if (to) return <Link to={to} className={cls}>{children}</Link>;
-  return <button onClick={onClick} className={cls}>{children}</button>;
+  return <button onClick={onClick} disabled={disabled} className={cls + ' disabled:opacity-50'}>{children}</button>;
 }
 export function Chip({ active, children, onClick }: { active?: boolean; children: React.ReactNode; onClick?: () => void }) {
   return (

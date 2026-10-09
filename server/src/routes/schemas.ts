@@ -78,6 +78,16 @@ export const recordQuery = pagingQuery.extend({
   customerId: z.string().max(64).optional(),
 });
 
+export const stylistReviewSchema = z.object({
+  versionId: z.string().min(1).max(64),
+  possible: z.enum(['가능', '조건부 가능', '어려움']),
+  curl: z.enum(['약', '중', '강']), sideControl: z.enum(['자연스럽게', '다운', '볼륨 유지']),
+  notes: z.array(z.string().min(1).max(100)).max(10), memo: z.string().max(1000),
+}).superRefine((review, ctx) => {
+  if (review.possible !== '가능' && !review.memo.trim())
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['memo'], message: '시술 조건 또는 어려운 이유를 메모에 입력해주세요.' });
+});
+
 export const recordBody = z.object({
   customerId: z.string().max(64).optional(),
   customerName: z.string().min(1).max(30),
@@ -87,32 +97,46 @@ export const recordBody = z.object({
   intent: z.string().max(200).optional(),
   adjustments: z.array(z.string().max(100)).max(20).optional(),
   condition: conditionSchema,
+  sessionId: z.string().max(64).optional(),
+  selectedVersionId: z.string().max(64).optional(),
+  stylistReview: stylistReviewSchema.optional(),
 });
 
 const regionSchema = z
   .object({
     id: z.string().max(64),
-    type: z.string().max(16),
+    type: z.enum(['fringe', 'side', 'crown', 'back', 'all']),
     x: z.number().min(0).max(1),
     y: z.number().min(0).max(1),
-    w: z.number().min(0).max(1),
-    h: z.number().min(0).max(1),
+    w: z.number().gt(0).max(1),
+    h: z.number().gt(0).max(1),
     label: z.string().max(20),
   })
   .nullable();
 
+const pngImage = z.string().min(1).max(8_000_000).regex(/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/, 'PNG 사진을 첨부해주세요.');
+const settingsShape = {
+  bang: z.number().min(0).max(100),
+  sideLength: z.number().min(0).max(100),
+  sideHair: z.string().max(30),
+  condition: z.object({
+    damage: z.enum(['건강','건조','손상','극손상']), texture: z.enum(['직모','반곱슬','곱슬']),
+    thickness: z.enum(['가늘음','보통','굵음']), density: z.enum(['낮음','보통','높음']),
+    elasticity: z.enum(['낮음','보통','높음']), feel: z.enum(['부드러움','보통','거침']),
+  }),
+};
 export const aiGenerateBody = z.object({
-  prompt: z.string().max(500).optional(),
-  presetId: z.string().max(64).optional(),
-  customerName: z.string().max(30).optional(),
+  requestId: z.string().min(1).max(64),
+  prompt: z.string().max(500).optional(), presetId: z.string().max(64).optional(),
+  customerName: z.string().min(1).max(30), intent: z.string().min(1).max(200),
+  photos: z.object({ front: pngImage, side: pngImage, back: pngImage }),
+  preset: presetBody.extend({ id: z.string().min(1).max(64), desc: z.string().max(60), refImages: z.array(pngImage).max(2).optional() }),
+  ...settingsShape,
 });
 
 export const aiEditBody = z.object({
-  image: imageStr,
-  region: regionSchema.optional(),
-  bang: z.number().min(0).max(100),
-  sideLength: z.number().min(0).max(100).optional(),
-  sideHair: z.string().max(30).optional(),
-  condition: z.unknown().optional(),
-  feedback: z.array(z.string().max(100)).max(20).optional(),
+  requestId: z.string().min(1).max(64), sessionId: z.string().min(1).max(64), baseVersionId: z.string().min(1).max(64),
+  view: z.enum(['front','side','back']), region: regionSchema,
+  feedback: z.array(z.string().max(100)).max(20), freeText: z.string().max(500),
+  ...settingsShape,
 });

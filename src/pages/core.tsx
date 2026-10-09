@@ -2,7 +2,11 @@ import { useEffect, useState } from 'react';
 import { useNavigate, Link, useParams } from 'react-router-dom';
 import { AppShell, PrimaryButton, SecondaryButton, PageHeader, Chip, Segmented } from '../components/ui';
 import { useAuth, useDash, useUi } from '../stores/baseStores';
-import { useConsult } from '../stores/consultationStore';
+import { useConsult, routeMap } from '../stores/consultationStore';
+import { api, getToken } from '../api/server';
+import { ReviewSummary } from './flow2';
+import type { ConsultationRecord } from '../types';
+import type { ImageVersion } from '../../server/src/providers/image/types';
 import {
   usePresets, presetSummary, MAX_REF_IMAGES,
   PRESET_CATEGORIES, PRESET_LENGTHS, PRESET_BANGS, PRESET_PERMS, PRESET_COLORS,
@@ -132,6 +136,7 @@ export function DashboardPage() {
   const serverMode = useAuth((s) => s.serverMode);
   const { customers, records, status, error, refresh } = useDash();
   const reset = useConsult((s) => s.reset);
+  const draft = useConsult();
   const [q, setQ] = useState('');
   useEffect(() => { void refresh(); }, [refresh]);
   const filtered = customers.filter((c) => c.name.includes(q));
@@ -149,6 +154,7 @@ export function DashboardPage() {
         )}
         <div className="mt-5 flex flex-col sm:flex-row gap-3">
           <PrimaryButton onClick={() => { reset(); nav('/consultations/new/start'); }}>+ 새 고객 상담</PrimaryButton>
+          {(draft.sessionId || draft.photos.front) && <SecondaryButton onClick={() => nav(routeMap[draft.step])}>진행 중인 상담 이어가기</SecondaryButton>}
           <SecondaryButton onClick={() => nav('/customers')}>고객 찾기</SecondaryButton>
         </div>
       </section>
@@ -262,8 +268,28 @@ export function CustomerDetailPage() {
 export function RecordDetailPage() {
   const { records } = useDash();
   const { recordId } = useParams();
-  const r = records.find((x) => x.id === recordId);
-  if (!r) {
+  const [remote, setRemote] = useState<ConsultationRecord>();
+  const [versions, setVersions] = useState<ImageVersion[]>([]);
+  const [preview, setPreview] = useState('');
+  const [historyError, setHistoryError] = useState('');
+  const r = remote ?? records.find((x) => x.id === recordId);
+  useEffect(() => {
+    let live = true;
+    setRemote(undefined); setVersions([]); setPreview(''); setHistoryError('');
+    if (recordId && getToken()) void api.records.get(recordId).then(record => {
+      if (live) setRemote(record);
+    }).catch(e => { if (live) setHistoryError(e instanceof Error ? e.message : '기록을 불러오지 못했어요.'); });
+    return () => { live = false; };
+  }, [recordId]);
+  useEffect(() => {
+    let live = true;
+    if (r?.sessionId) void api.ai.session(r.sessionId).then(session => {
+      if (live) { setVersions(session.versions); setPreview(r.selectedVersionId ?? ''); }
+    }).catch(e => { if (live) setHistoryError(e instanceof Error ? e.message : '버전을 불러오지 못했어요.'); });
+    return () => { live = false; };
+  }, [r?.sessionId]);
+  const views = versions.find(v => v.id === preview)?.views ?? r?.views;
+  if (!r || !views) {
     return (
       <AppShell>
         <PageHeader title="기록을 찾을 수 없습니다." sub="삭제되었거나 잘못된 주소입니다." />
@@ -274,10 +300,13 @@ export function RecordDetailPage() {
   return (
     <AppShell>
       <PageHeader title={`${r.customerName} · ${r.styleName}`} sub={`${r.date} 상담 조정 기록`} />
+      {historyError && <p role="alert" className="text-error mb-3">{historyError}</p>}
+      {versions.length > 0 && <div className="flex flex-wrap gap-2 mb-4">{versions.map(v => <button key={v.id} onClick={() => setPreview(v.id)} className={`min-h-[44px] px-4 rounded-xl border ${preview === v.id ? 'border-primary bg-primarySoft' : 'border-line'}`}>후보 {v.candidateId} · {v.label}{r.selectedVersionId === v.id ? ' · 최종' : ''}</button>)}</div>}
+      {versions.find(v => v.id === preview)?.summary && <p className="text-secondary mb-3">{versions.find(v => v.id === preview)?.summary}</p>}
       <div className="grid grid-cols-3 gap-2 mb-4">
         {(['front', 'side', 'back'] as const).map((k, i) => (
           <div key={k}>
-            <img src={r.views[k]} alt="" className="w-full aspect-[3/3.8] object-cover rounded-2xl border border-line" />
+            <img src={views[k]} alt="" className="w-full aspect-[3/3.8] object-cover rounded-2xl border border-line" />
             <p className="text-center text-[13px] text-muted mt-1">{['앞', '옆', '뒤'][i]}</p>
           </div>
         ))}
@@ -302,6 +331,7 @@ export function RecordDetailPage() {
           </p>
         </div>
       )}
+      {r.stylistReview && <ReviewSummary review={r.stylistReview} />}
       <PrimaryButton to="/dashboard">확인</PrimaryButton>
     </AppShell>
   );

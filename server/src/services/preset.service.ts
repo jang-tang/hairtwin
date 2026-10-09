@@ -28,37 +28,37 @@ function assertPresetInput(input: repo.PresetInput, partial = false): void {
   }
 }
 
-export function listPresets(designerId: string, q: Record<string, unknown>) {
+export async function listPresets(designerId: string, q: Record<string, unknown>) {
   const { page, limit } = parsePaging(q);
   const search = String(q.search ?? '').trim();
   const category = String(q.category ?? '').trim();
   const db = getDb();
-  const total = repo.countPresets(designerId, search, category, db);
-  const rows = repo.listPresets(designerId, { search, category, page, limit }, db);
+  const total = (await repo.countPresets(designerId, search, category, db));
+  const rows = (await repo.listPresets(designerId, { search, category, page, limit }, db));
   return { items: rows.map(repo.toPublicPreset), meta: pageMeta(page, limit, total) };
 }
 
-export function getPreset(designerId: string, id: string) {
-  const row = repo.findPreset(designerId, id, getDb());
+export async function getPreset(designerId: string, id: string) {
+  const row = (await repo.findPreset(designerId, id, getDb()));
   if (!row) throw notFound('프리셋을 찾을 수 없습니다.');
   return repo.toPublicPreset(row);
 }
 
-export function createPreset(designerId: string, input: repo.PresetInput) {
+export async function createPreset(designerId: string, input: repo.PresetInput) {
   assertPresetInput(input);
-  const row = repo.createPreset(designerId, { ...input, name: input.name.trim() }, getDb());
+  const row = (await repo.createPreset(designerId, { ...input, name: input.name.trim() }, getDb()));
   return repo.toPublicPreset(row);
 }
 
-export function updatePreset(designerId: string, id: string, input: Partial<repo.PresetInput>) {
+export async function updatePreset(designerId: string, id: string, input: Partial<repo.PresetInput>) {
   assertPresetInput(input as repo.PresetInput, true);
   const patch = input.name !== undefined ? { ...input, name: input.name.trim() } : input;
-  const row = repo.updatePreset(designerId, id, patch, getDb());
+  const row = (await repo.updatePreset(designerId, id, patch, getDb()));
   if (!row) throw notFound('프리셋을 찾을 수 없습니다.');
   return repo.toPublicPreset(row);
 }
 
-export function deletePreset(designerId: string, id: string) {
-  const ok = repo.softDeletePreset(designerId, id, getDb());
+export async function deletePreset(designerId: string, id: string) {
+  const ok = (await repo.softDeletePreset(designerId, id, getDb()));
   if (!ok) throw notFound('프리셋을 찾을 수 없습니다.');
 }

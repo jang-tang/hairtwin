@@ -1,12 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { normalizePhoto, photoFromFile } from '../utils/photos';
 import { useNavigate } from 'react-router-dom';
 import { AppShell, PrimaryButton, SecondaryButton, PageHeader, Chip, Segmented, SliderControl, NoConsult, Guard, MockBadge } from '../components/ui';
-import { useConsult, transitionTo, makeCandidates, stepOrder } from '../stores/consultationStore';
+import { useConsult, transitionTo } from '../stores/consultationStore';
 import { usePresets, presetSummary } from '../stores/presetStore';
 import { useDash, useUi } from '../stores/baseStores';
 import { PRESETS, img, BANG_QUICK, bangLabel } from '../data';
 import { mockPortrait, isMockMode } from '../mocks/mockImages';
-import { requestGeneration } from '../api/aiClient';
+import { useAiJob } from '../hooks/useAiJob';
+import { AiJobProgress } from '../components/AiJobProgress';
+import type { GenerationResult } from '../../server/src/providers/image/types';
 
 function StepDots({ step, total }: { step: number; total: number }) {
   return <PageHeader title="" sub="" step={step} total={total} />;
@@ -91,54 +94,49 @@ export function IntentPage() {
 export function PhotoPage() {
   const nav = useNavigate();
   const { photos, set } = useConsult();
+  const input = useRef<HTMLInputElement>(null);
   const [tab, setTab] = useState<'front' | 'side' | 'back'>('front');
-  const labels = { front: '정면을 바라봐주세요.', side: '옆모습을 보여주세요.', back: '뒷모습을 보여주세요.' } as const;
+  const [busy, setBusy] = useState(false), [error, setError] = useState('');
+  const labels = { front: '정면', side: '측면', back: '후면' };
   const done = photos.front && photos.side && photos.back;
-  const capture = () => {
-    const shot = isMockMode()
-      ? mockPortrait(`customer-${tab}-${Date.now()}`, tab, '현재 머리', tab === 'front' ? '정면 촬영' : tab === 'side' ? '옆모습 촬영' : '뒷모습 촬영')
-      : img(`cust${tab}${Date.now() % 997}`, 700);
-    set({ photos: { ...photos, [tab]: shot } });
-    if (tab === 'front') setTab('side'); else if (tab === 'side') setTab('back');
+  const save = async (load: () => Promise<string>) => {
+    setBusy(true); setError('');
+    try {
+      const image = await load();
+      set({ photos: { ...useConsult.getState().photos, [tab]: image } });
+      if (tab === 'front') setTab('side'); else if (tab === 'side') setTab('back');
+    } catch (e) { setError(e instanceof Error ? e.message : '사진을 불러오지 못했어요.'); }
+    finally { setBusy(false); }
   };
   return (
     <AppShell>
-      <PageHeader title="현재 머리를 세 방향에서 보여주세요." sub="머리 끝까지 프레임에 들어오게 해주세요." step={3} total={TOTAL} />
+      <PageHeader title="현재 머리를 세 방향에서 보여주세요." sub="얼굴과 머리 전체가 보이는 사진을 촬영하거나 선택해주세요." step={3} total={TOTAL} />
       <div className="flex gap-2 mb-4">
-        {(['front', 'side', 'back'] as const).map((k, i) => (
-          <button key={k} onClick={() => setTab(k)}
-            className={`flex-1 min-h-[48px] rounded-xl border font-bold ${tab === k ? 'bg-ink text-white border-ink' : 'border-line text-secondary'}`}>
-            {photos[k] ? '● ' : '○ '}{['앞', '옆', '뒤'][i]}
+        {(['front','side','back'] as const).map(k => (
+          <button key={k} disabled={busy} onClick={() => setTab(k)}
+            className={`flex-1 min-h-[48px] rounded-xl border font-bold ${tab === k ? 'bg-ink text-white' : 'border-line'}`}>
+            {photos[k] ? '● ' : '○ '}{labels[k]}
           </button>
         ))}
       </div>
-      <p className="font-bold text-[18px] mb-2">{labels[tab]}</p>
-      <div className="relative rounded-3xl overflow-hidden border-2 border-line bg-softBg mb-4">
-        {photos[tab]
-          ? <img src={photos[tab]!} alt={tab} className="w-full aspect-[4/4.4] object-cover" />
-          : (
-            <div className="aspect-[4/4.4] flex flex-col items-center justify-center gap-3 p-8">
-              <div className="w-44 h-56 rounded-[90px] border-[3px] border-dashed border-primary/60 flex items-center justify-center">
-                <span className="text-[44px]">📷</span>
-              </div>
-              <p className="text-secondary text-[15px]">얼굴 중심에 맞춰주세요 · 머리 윗부분이 잘리지 않게</p>
-            </div>
-          )}
-        <div className="absolute top-3 left-1/2 -translate-x-1/2 bg-black/55 text-white text-[13px] px-4 py-1.5 rounded-full">얼굴과 머리 전체가 보이게</div>
+      <p className="font-bold text-[18px] mb-2">{labels[tab]} 사진</p>
+      <div className="rounded-3xl overflow-hidden border-2 border-line bg-softBg mb-4">
+        {photos[tab] ? <img src={photos[tab]!} alt={labels[tab]} className="w-full aspect-square object-contain" /> :
+          <div className="aspect-square flex items-center justify-center text-secondary">얼굴과 머리 끝까지 프레임에 담아주세요.</div>}
       </div>
-      {!photos[tab]
-        ? <PrimaryButton onClick={capture}>촬영하기</PrimaryButton>
-        : (
-          <div className="flex gap-2">
-            <SecondaryButton onClick={() => set({ photos: { ...photos, [tab]: null } })}>다시 촬영</SecondaryButton>
-            <div className="flex-1">
-              {done
-                ? <PrimaryButton onClick={() => transitionTo('style', nav)}>다음 · 스타일 고르기</PrimaryButton>
-                : <PrimaryButton onClick={capture}>다음 방향 촬영</PrimaryButton>}
-            </div>
-          </div>
-        )}
-      <div className="flex gap-2 mt-3"><SecondaryButton onClick={() => transitionTo('intent', nav)}>이전</SecondaryButton></div>
+      <input ref={input} type="file" accept="image/png,image/jpeg,image/webp" capture="environment" className="hidden"
+        aria-label={labels[tab] + ' 고객 사진'} onChange={e => {
+          const file = e.target.files?.[0]; e.target.value = '';
+          if (file) void save(() => photoFromFile(file));
+        }} />
+      <PrimaryButton disabled={busy} onClick={() => input.current?.click()}>{busy ? '사진 준비 중…' : photos[tab] ? '사진 다시 선택' : '촬영 또는 사진 선택'}</PrimaryButton>
+      {isMockMode() && <div className="mt-2"><SecondaryButton disabled={busy}
+        onClick={() => void save(() => normalizePhoto(mockPortrait('customer-' + tab, tab, '연습용 사진', labels[tab])))}>연습용 사진 사용</SecondaryButton></div>}
+      {error && <p role="alert" className="text-error mt-2">{error}</p>}
+      <div className="flex gap-2 mt-4">
+        <SecondaryButton onClick={() => transitionTo('intent', nav)}>이전</SecondaryButton>
+        <div className="flex-1"><PrimaryButton disabled={!done || busy} onClick={() => transitionTo('style', nav)}>다음 · 스타일 고르기</PrimaryButton></div>
+      </div>
     </AppShell>
   );
 }
@@ -225,7 +223,7 @@ export function ConditionPage() {
       <BangBlock />
       <div className="flex gap-2 mt-4">
         <SecondaryButton onClick={() => transitionTo('style', nav)}>이전</SecondaryButton>
-        <div className="flex-1"><PrimaryButton onClick={() => transitionTo('generation', nav)}>AI로 3가지 방향 만들기</PrimaryButton></div>
+        <div className="flex-1"><PrimaryButton onClick={() => { set({ generationRequestId: crypto.randomUUID(), generationJobId: '', editJobId: '', editRequestId: '', sessionId: null, candidates: [], versions: [], chosenVersion: '', selectedCandidate: null }); transitionTo('generation', nav); }}>AI로 3가지 방향 만들기</PrimaryButton></div>
       </div>
     </AppShell>
   );
@@ -255,33 +253,49 @@ export function BangBlock() {
 
 export function GenerationPage() {
   const nav = useNavigate();
-  const { presetId, set } = useConsult();
-  const [err, setErr] = useState('');
+  const [err, setErr] = useState(''), [attempt, setAttempt] = useState(0);
+  const work = useAiJob('generate');
   useEffect(() => {
+    if (work.job?.status !== 'completed' || !work.job.result) return;
+    useConsult.getState().acceptGeneration(work.job.result as GenerationResult);
+    transitionTo('candidates', nav);
+  }, [work.job, nav]);
+  useEffect(() => {
+    if (work.id) return;
+    const saved = useConsult.getState();
+    if (saved.sessionId && saved.candidates.length) { transitionTo('candidates', nav); return; }
     let live = true;
+    setErr('');
     (async () => {
       try {
-        const res = await requestGeneration(`preset:${presetId}`);
+        const s = useConsult.getState();
+        if (!s.photos.front || !s.photos.side || !s.photos.back) throw new Error('정면·측면·후면 사진을 모두 선택해주세요.');
+        const builtin = PRESETS.find(p => p.id === s.presetId);
+        const preset = usePresets.getState().presets.find(p => p.id === s.presetId) ??
+          (builtin ? { ...builtin, refImages: [] } : null);
+        if (!preset) throw new Error('스타일을 선택해주세요.');
+        const requestId = s.generationRequestId || crypto.randomUUID();
+        s.set({ generationRequestId: requestId });
+        const refs = await Promise.all(preset.refImages.slice(0, 2).map(normalizePhoto));
         if (!live) return;
-        set({ candidates: res.candidates ?? makeCandidates(presetId ?? 'hair'), step: 'generation' });
-        transitionTo('candidates', nav);
+        await work.start({
+          requestId, customerName: s.customerName, intent: s.intent,
+          photos: { front: s.photos.front, side: s.photos.side, back: s.photos.back },
+          presetId: s.presetId ?? undefined, preset: { ...preset, refImages: refs },
+          condition: s.condition, bang: s.bang, sideLength: s.sideLength, sideHair: s.sideHair,
+        });
       } catch (e) { if (live) setErr(e instanceof Error ? e.message : '생성에 실패했어요. 다시 시도해주세요.'); }
     })();
     return () => { live = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  const pct = stepOrder.indexOf('generation');
-  void pct;
+  }, [attempt, work.id, work.start]);
   return (
     <AppShell>
-      <PageHeader title="3가지 방향을 만들고 있어요." sub="앞·옆·뒤가 같은 스타일로 유지돼요." step={6} total={TOTAL} />
-      {isMockMode() && <div className="mb-3"><MockBadge /></div>}
-      <div className="border border-line rounded-3xl p-10 text-center">
-        <div className="h-2 rounded-full bg-line overflow-hidden mb-5"><div className="h-full w-2/5 bg-primary rounded-full ht-progress" /></div>
-        <p className="font-bold text-[18px]">{isMockMode() ? '목업 이미지를 준비하는 중…' : 'AI가 헤어를 그리는 중…'}</p>
-        <p className="text-secondary mt-1">잠시만 태블릿을 함께 봐주세요.</p>
-        {err && <><p className="text-error mt-3">{err}</p><div className="mt-4"><PrimaryButton onClick={() => transitionTo('candidates', nav)}>그래도 보기</PrimaryButton></div></>}
-      </div>
+      <PageHeader title="3가지 방향을 만들고 있어요." sub="고객 사진과 상담 조건을 반영해 후보별로 앞·옆·뒤를 준비해요." step={6} total={TOTAL} />
+      <AiJobProgress job={work.job} error={err || work.error} sending={work.sending} onCancel={work.cancel} onRetry={work.retry} />
+      {err && !work.id && <div className="mt-4"><PrimaryButton onClick={() => setAttempt(n => n + 1)}>작업 시작 다시 시도</PrimaryButton></div>}
+      <div className="mt-4"><SecondaryButton disabled={work.busy} onClick={() => {
+        work.clear(); useConsult.getState().set({ generationRequestId: '' }); transitionTo('condition', nav);
+      }}>상담 조건으로 돌아가기</SecondaryButton></div>
     </AppShell>
   );
 }

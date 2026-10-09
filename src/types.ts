@@ -1,7 +1,7 @@
 export type RegionType = 'fringe' | 'side' | 'crown' | 'back' | 'all';
 export interface Region { id: string; type: RegionType; x: number; y: number; w: number; h: number; label: string; }
 export interface TriView { front: string; side: string; back: string; }
-export interface Candidate { id: string; name: string; desc: string; views: TriView; }
+export interface Candidate { id: string; name: string; desc: string; views: TriView; versionId?: string; }
 export interface HairCondition {
   damage: '건강' | '건조' | '손상' | '극손상';
   texture: '직모' | '반곱슬' | '곱슬';
@@ -15,6 +15,8 @@ export interface Customer { id: string; name: string; phone?: string; lastVisit?
 export interface ConsultationRecord {
   id: string; customerName: string; date: string; styleName: string;
   views: TriView; intent: string; adjustments: string[]; condition: HairCondition | null;
+  sessionId?: string; selectedVersionId?: string;
+  stylistReview?: import('../server/src/providers/image/types').StylistReview;
 }
 export const REGION_LABEL: Record<RegionType, string> = {
   fringe: '앞머리', side: '옆머리', crown: '정수리', back: '뒷머리', all: '전체'
