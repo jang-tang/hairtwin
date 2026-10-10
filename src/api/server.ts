@@ -92,6 +92,10 @@ export interface Designer {
 }
 
 export const api = {
+  preRegistrations: {
+    create: (input: { salonName: string; email: string; contactName?: string; region?: string; consent: boolean; website?: string }) =>
+      request<{ registered: true }>('/pre-registrations', { method: 'POST', body: JSON.stringify(input) }, false),
+  },
   login: (name: string) =>
     request<{ token: string; designer: Designer }>('/auth/login', { method: 'POST', body: JSON.stringify({ name }) }, false),
   me: () => request<{ designer: Designer }>('/auth/me'),

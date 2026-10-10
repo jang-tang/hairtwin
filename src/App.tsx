@@ -6,6 +6,7 @@ import { LoginPage, DashboardPage, CustomersPage, CustomerDetailPage, RecordDeta
 import { StartPage, IntentPage, PhotoPage, StylePage, ConditionPage, GenerationPage } from './pages/flow1';
 import { CandidatesPage, FeedbackPage, InterpretationPage, ComparisonPage, StylistReviewPage, FinalizePage, ReportPage } from './pages/flow2';
 import { routeMap, useConsult } from './stores/consultationStore';
+import { PreRegistrationPage } from './pages/preRegistration';
 
 function RequireAuth({ children }: { children: JSX.Element }) {
   const loggedIn = useAuth((s) => s.loggedIn);
@@ -56,6 +57,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/pre-register" element={<PreRegistrationPage />} />
           <Route path="/dashboard" element={<RequireAuth><DashboardPage /></RequireAuth>} />
           <Route path="/customers" element={<RequireAuth><CustomersPage /></RequireAuth>} />
           <Route path="/customers/:customerId" element={<RequireAuth><CustomerDetailPage /></RequireAuth>} />

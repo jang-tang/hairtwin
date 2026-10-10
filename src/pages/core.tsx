@@ -13,6 +13,7 @@ import {
 } from '../stores/presetStore';
 import { PRESETS, img } from '../data';
 import { mockPortrait } from '../mocks/mockImages';
+import { PreRegistrationCta } from '../components/PreRegistrationCta';
 
 export function LoginPage() {
   const nav = useNavigate();
@@ -42,11 +43,11 @@ export function LoginPage() {
     <div className="min-h-full bg-white">
       {/* 상단 바 */}
       <header className="max-w-[1024px] mx-auto px-5 h-[64px] flex items-center justify-between">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <span className="w-8 h-8 rounded-xl bg-primary text-white font-black flex items-center justify-center text-[18px]">H</span>
           <span className="font-extrabold text-[19px] tracking-tight">Hair Twin</span>
         </div>
-        <span className="text-[13px] text-muted tracking-widest font-semibold">SALON CONSULTATION SPACE</span>
+        <span className="hidden sm:block text-[13px] text-muted tracking-widest font-semibold">SALON CONSULTATION SPACE</span>
       </header>
 
       {/* 히어로 */}
@@ -65,7 +66,7 @@ export function LoginPage() {
               세 방향 촬영 → 스타일 선택 → 직접 끌어 조정까지.<br />
               타이핑 없이, 태블릿 하나로 고객과 같은 결과를 바라보세요.
             </p>
-            <div className="flex gap-2 mt-5 text-[13px] font-semibold">
+            <div className="flex flex-wrap gap-2 mt-5 text-[13px] font-semibold">
               <span className="bg-ink text-white rounded-full px-4 py-2">타이핑 없음</span>
               <span className="border border-line rounded-full px-4 py-2 text-secondary">앞·옆·뒤 비교</span>
               <span className="border border-line rounded-full px-4 py-2 text-secondary">시술 전 합의</span>
@@ -84,7 +85,7 @@ export function LoginPage() {
 
       {/* 3단계 */}
       <section className="max-w-[1024px] mx-auto px-5 pb-8">
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid sm:grid-cols-3 gap-3">
           {[
             ['01', '세 방향에서 촬영', '앞·옆·뒤를 담아요'],
             ['02', '눌러서 스타일 선택', '후보 3가지 비교'],
@@ -101,14 +102,14 @@ export function LoginPage() {
 
       {/* 로그인 카드 */}
       <section className="max-w-[1024px] mx-auto px-5 pb-16">
-        <div className="bg-ink text-white rounded-3xl p-7 sm:p-9 grid sm:grid-cols-[1fr_320px] gap-6 items-center">
-          <div>
+        <div className="bg-ink text-white rounded-3xl p-6 sm:p-9 grid lg:grid-cols-[minmax(0,1fr)_320px] gap-6 items-center">
+          <div className="min-w-0">
             <h2 className="text-[24px] font-extrabold">디자이너 로그인</h2>
             <p className="text-white/60 text-[15px] mt-1">태블릿을 켜고 바로 상담을 시작하세요. 비밀번호는 필요 없어요.</p>
-            <div className="mt-4 flex gap-2">
+            <div className="mt-4 flex flex-col sm:flex-row gap-2">
               <input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') start(); }}
                 placeholder="지수 디자이너"
-                className="flex-1 min-h-[52px] rounded-2xl px-4 text-[16px] text-ink bg-white outline-none focus:ring-2 focus:ring-primary" />
+                className="w-full min-w-0 sm:flex-1 min-h-[52px] rounded-2xl px-4 text-[16px] text-ink bg-white outline-none focus:ring-2 focus:ring-primary" />
               <button onClick={start} disabled={busy}
                 className="min-h-[52px] px-7 rounded-2xl bg-primary hover:bg-primaryDark font-bold text-[16px] transition active:scale-[.98] whitespace-nowrap disabled:opacity-60">
                 {busy ? '접속 중…' : '시작하기'}
@@ -117,7 +118,7 @@ export function LoginPage() {
             {err && <p className="text-warning text-[14px] mt-2">{err}</p>}
             <p className="text-white/40 text-[13px] mt-3">데모 환경 · 입력한 이름으로 인사말이 표시됩니다</p>
           </div>
-          <div className="hidden sm:block">
+          <div className="hidden lg:block">
             <div className="bg-white/10 border border-white/15 rounded-2xl p-5">
               <p className="text-[14px] text-white/70 leading-relaxed">“이거 어떻게 써요?”라는 질문이 나오지 않는 상담 도구. 화면 자체가 사용법을 알려줍니다.</p>
               <p className="text-primary font-bold text-[14px] mt-3">— Hair Twin UX 원칙</p>
@@ -126,6 +127,7 @@ export function LoginPage() {
         </div>
         <p className="text-center text-muted text-[13px] mt-6">Hair Twin · Premium Beauty Tech</p>
       </section>
+      <PreRegistrationCta />
     </div>
   );
 }

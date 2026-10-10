@@ -144,6 +144,24 @@ const MIGRATIONS: { version: number; name: string; sql: string }[] = [
     END;
     `,
   },
+  {
+    version: 5, name: 'salon_pre_registrations',
+    sql: `
+      CREATE TABLE pre_registrations (
+        id TEXT PRIMARY KEY,
+        salon_name TEXT NOT NULL,
+        email TEXT NOT NULL,
+        contact_name TEXT NOT NULL DEFAULT '',
+        region TEXT NOT NULL DEFAULT '',
+        consent_version TEXT NOT NULL,
+        consented_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        UNIQUE(salon_name, email)
+      );
+      CREATE INDEX idx_pre_registrations_expiry ON pre_registrations(expires_at);
+    `,
+  },
 ];
 
 let db: DatabaseSync | null = null;

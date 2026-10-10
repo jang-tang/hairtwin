@@ -1,4 +1,7 @@
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
+import { AppError } from '../utils/http.js';
+import { create as createPreRegistration } from '../controllers/preRegistration.controller.js';
 import { getDb } from '../db/database.js';
 import { config } from '../config.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -17,6 +20,7 @@ import {
   idParam,
   loginBody,
   pagingQuery,
+  preRegistrationBody,
   presetBody,
   presetPatchBody,
   presetQuery,
@@ -27,6 +31,10 @@ import {
 
 export function buildRouter(): Router {
   const r = Router();
+  r.post('/pre-registrations', rateLimit({
+    windowMs: 60 * 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false,
+    handler: (_req, _res, next) => next(new AppError(429, 'RATE_LIMITED', '신청 요청이 많습니다. 잠시 후 다시 시도해주세요.')),
+  }), validate({ body: preRegistrationBody }), createPreRegistration);
 
   r.get('/health', async (_req, res, next) => {
     try {

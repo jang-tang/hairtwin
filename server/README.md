@@ -37,6 +37,7 @@ npm run dev            # :8787 (SQLite 마이그레이션 + 데모 시드 자동
 | Method | Path | Auth | 설명 |
 |---|---|---|---|
 | GET | `/health` | - | 상태 확인 |
+| POST | `/pre-registrations` | - | 미용실명·이메일·동의로 사전 예약 접수, IP당 시간당 10회 |
 | POST | `/auth/login` | - | `{name}` → `{token, designer}` (mock: 자동 가입) |
 | POST | `/auth/register` | - | `{name, password}` (real 모드용) |
 | GET | `/auth/me` | O | 현재 디자이너 |
@@ -54,7 +55,9 @@ npm run dev            # :8787 (SQLite 마이그레이션 + 데모 시드 자동
 (`VALIDATION_FAILED` 400 / `UNAUTHORIZED` 401 / `FORBIDDEN` 403 / `NOT_FOUND` 404 /
 `EXTERNAL_API_ERROR` 502 / `INTERNAL_ERROR` 500).
 
-모든 리소스는 `designer_id` 소유권으로 격리된다.
+상담 리소스는 `designer_id` 소유권으로 격리된다. 사전 예약은 공개 POST만 제공하며 신청 목록·상세 조회 API는 제공하지 않는다.
+
+사전 예약 요청은 `{salonName, email, consent: true, contactName?, region?}`이며 성공 시 201과 `{ok:true,data:{registered:true}}`를 반환한다. 같은 미용실명·이메일의 재요청도 동일하게 응답하며 기존 연락처를 변경하지 않는다. 동의 기록과 365일 만료 시각을 저장하고 서버 시작·매시간·접수 시 만료 신청을 정리한다. 실제 이메일 발송은 별도 연결이 필요하다.
 
 ## 구조
 
