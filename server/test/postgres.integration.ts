@@ -50,6 +50,13 @@ provider.generate = (input, execution?: ImageExecution) => originalGenerate(inpu
 });
 try {
   const health = await request('/health'); assert.equal(health.data.database.provider, 'postgres');
+  const lead = { salonName: '사전 예약 검증 ' + suffix, email: 'salon-' + suffix + '@example.com', consent: true, region: '서울' };
+  assert.equal((await request('/pre-registrations', 'POST', lead, '')).status, 201);
+  assert.equal((await request('/pre-registrations', 'POST', lead, '')).status, 201);
+  const applications = await getDb().prepare('SELECT salon_name, consent_version FROM pre_registrations WHERE email = ?').all<any>(lead.email);
+  assert.equal(applications.length, 1);
+  assert.equal(applications[0].salon_name, lead.salonName);
+  assert.equal(applications[0].consent_version, '2026-10-10');
   const logins = await Promise.all([request('/auth/login','POST',{ name: 'DB 검증 ' + suffix }), request('/auth/login','POST',{ name: 'DB 검증 ' + suffix })]);
   assert.equal(logins[0].data.designer.id, logins[1].data.designer.id);
   token = logins[0].data.token;

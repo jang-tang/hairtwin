@@ -2,6 +2,16 @@ import { z } from 'zod';
 
 export const idParam = z.object({ id: z.string().min(1) });
 
+export const preRegistrationBody = z.object({
+  salonName: z.string().trim().min(1, '미용실 이름을 입력해주세요.').max(100)
+    .transform(value => value.normalize('NFKC').replace(/\s+/g, ' ')),
+  email: z.string().trim().max(254).email('이메일 주소를 확인해주세요.').transform(value => value.toLowerCase()),
+  contactName: z.string().trim().max(50).optional(),
+  region: z.string().trim().max(100).optional(),
+  consent: z.literal(true, { errorMap: () => ({ message: '개인정보 수집·이용에 동의해주세요.' }) }),
+  website: z.literal('').optional(),
+});
+
 export const pagingQuery = z.object({
   page: z.coerce.number().int().min(1).max(1000).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),

@@ -5,10 +5,12 @@ import { shutdownJobs } from './services/aiJob.service.js';
 import { runSeed } from './db/seed.js';
 import { causeDiagnostic } from './utils/errorLog.js';
 import { createShutdownHandler } from './serverLifecycle.js';
+import { purgeExpiredPreRegistrations, startPreRegistrationCleanup } from './services/preRegistration.service.js';
 
 async function main(): Promise<void> {
   // DB 연결(마이그레이션) + 데모 시드
   await initializeDb();
+  await purgeExpiredPreRegistrations();
   if (config.seedDemo) {
     try {
       await runSeed();
@@ -22,7 +24,11 @@ async function main(): Promise<void> {
     // eslint-disable-next-line no-console
     console.log(`[hairtwin-server] listening on :${config.port} (auth=${config.authProvider}, ai=${config.aiProvider}, db=${config.dbProvider})`);
   });
-  const shutdown = createShutdownHandler(server, { stopJobs: shutdownJobs, closeDatabase: closeDb });
+  const stopCleanup = startPreRegistrationCleanup();
+  const shutdown = createShutdownHandler(server, {
+    stopJobs: async () => { stopCleanup(); await shutdownJobs(); },
+    closeDatabase: closeDb,
+  });
   let stopping: Promise<void> | undefined;
   const stop = () => stopping ??= shutdown().then(() => {
     console.log(JSON.stringify({ event: 'server.stopped' }));

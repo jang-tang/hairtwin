@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth, useUi } from '../stores/baseStores';
+import { PreRegistrationCta } from './PreRegistrationCta';
 
 export function PrimaryButton({ children, onClick, to, disabled }: { children: React.ReactNode; onClick?: () => void; to?: string; disabled?: boolean }) {
   const cls = `min-h-[52px] px-8 rounded-2xl text-[17px] font-semibold text-white transition active:scale-[.98] flex items-center justify-center gap-2 ${disabled ? 'bg-line text-muted cursor-not-allowed' : 'bg-primary hover:bg-primaryDark shadow-[0_6px_20px_rgba(255,74,93,.3)]'}`;
@@ -71,30 +72,31 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-full bg-white">
       <header className="sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-line">
-        <div className="max-w-[1024px] mx-auto px-5 h-[64px] flex items-center justify-between gap-2">
-          <button onClick={() => nav('/dashboard')} className="flex items-center gap-2 shrink-0">
+        <div className="max-w-[1024px] mx-auto px-5 py-2 sm:py-0 min-h-[64px] flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+          <button onClick={() => nav('/dashboard')} className="flex items-center gap-2 shrink-0 min-h-[44px]">
             <span className="w-8 h-8 rounded-xl bg-primary text-white font-black flex items-center justify-center text-[18px]">H</span>
             <span className="font-extrabold text-[19px] tracking-tight">Hair Twin</span>
           </button>
-          <nav className="flex items-center gap-2">
+          <nav aria-label="매장 메뉴" className="flex w-full sm:w-auto flex-wrap items-center gap-2">
             <Link
               to="/presets"
-              className={`text-[14px] font-bold rounded-full px-4 min-h-[36px] flex items-center border transition ${onPresets && loc.pathname === '/presets' ? 'bg-ink text-white border-ink' : 'border-line text-secondary'}`}
+              className={`text-[14px] font-bold rounded-full px-3 sm:px-4 min-h-[44px] flex items-center whitespace-nowrap border transition ${onPresets && loc.pathname === '/presets' ? 'bg-ink text-white border-ink' : 'border-line text-secondary'}`}
             >
               프리셋
             </Link>
             <Link
               to="/presets/new"
-              className={`text-[14px] font-bold rounded-full px-4 min-h-[36px] flex items-center transition active:scale-95 ${loc.pathname === '/presets/new' ? 'bg-primaryDark text-white' : 'bg-primary text-white'}`}
+              className={`text-[14px] font-bold rounded-full px-3 sm:px-4 min-h-[44px] flex items-center whitespace-nowrap transition active:scale-95 ${loc.pathname === '/presets/new' ? 'bg-primaryDark text-white' : 'bg-primary text-white'}`}
             >
               + 프리셋 등록
             </Link>
-            <span className="text-[14px] text-secondary hidden md:block ml-1">{designer}</span>
-            <button onClick={() => { logout(); nav('/login'); }} className="text-[14px] text-muted border border-line rounded-full px-4 min-h-[36px]">로그아웃</button>
+            <span className="text-[14px] text-secondary hidden md:block ml-1 max-w-[160px] truncate" title={designer}>{designer}</span>
+            <button onClick={() => { logout(); nav('/login'); }} className="text-[14px] text-muted border border-line rounded-full px-3 sm:px-4 min-h-[44px] whitespace-nowrap">로그아웃</button>
           </nav>
         </div>
       </header>
       <main className="max-w-[1024px] mx-auto px-5 py-6 pb-28">{children}</main>
+      {loc.pathname === '/dashboard' && <PreRegistrationCta />}
       {toast && (
         <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 bg-ink text-white text-[15px] font-semibold px-5 py-3 rounded-2xl shadow-lg ht-fade whitespace-nowrap">
           {toast}

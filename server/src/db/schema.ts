@@ -1,7 +1,7 @@
 import type { Database } from './types.js';
 import { AppError } from '../utils/http.js';
 
-export const APP_TABLES = ['designers', 'customers', 'presets', 'consultation_records', 'ai_sessions', 'ai_versions', 'ai_jobs'] as const;
+export const APP_TABLES = ['designers', 'customers', 'presets', 'consultation_records', 'ai_sessions', 'ai_versions', 'ai_jobs', 'pre_registrations'] as const;
 export const RECORD_CONSTRAINTS = ['records_customer_owner_fk', 'records_session_owner_fk', 'records_version_session_fk', 'records_session_version_pair'] as const;
 type InspectQuery = (sql: string) => Promise<{ rows: Record<string, unknown>[] }>;
 const schemaMissing = () => new AppError(500, 'DATABASE_SCHEMA_MISSING', '필수 DB 마이그레이션을 적용해주세요.');
